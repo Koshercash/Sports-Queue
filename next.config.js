@@ -11,6 +11,9 @@ const nextConfig = {
       // Add other patterns if needed
     ],
   },
+  env: {
+    MONGODB_URI: process.env.MONGODB_URI,
+  },
   // ... other configurations
 }
 

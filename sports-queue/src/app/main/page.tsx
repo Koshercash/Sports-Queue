@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Button } from "../../components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "../../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
 import { UserProfile } from '@/components/UserProfile';
-import { InteractableProfilePicture } from '@/components/InteractableProfilePicture';
+import { InteractableProfilePicture } from '../../components/InteractableProfilePicture';
 import Link from 'next/link';
 
 interface UserProfile {
@@ -24,8 +24,7 @@ interface UserProfile {
 }
 
 interface Friend {
-  _id: string;
-  friendId: string;
+  id: string;
   name: string;
   profilePicture: string | null;
 }
@@ -117,13 +116,29 @@ export default function MainScreen() {
   const fetchFriends = async () => {
     try {
       const token = localStorage.getItem('token');
+      console.log('Token:', token ? 'exists' : 'not found');
+
       const response = await axios.get<Friend[]>('http://localhost:3002/api/friends', {
         headers: { Authorization: `Bearer ${token}` }
       });
-      console.log('Fetched friends:', response.data); // Add this line for debugging
-      setFriends(response.data);
+      console.log('Full API response:', response);
+
+      if (response.data && Array.isArray(response.data)) {
+        console.log('Fetched friends:', response.data);
+        const formattedFriends = response.data.map(friend => ({
+          ...friend,
+          profilePicture: friend.profilePicture ? `http://localhost:3002${friend.profilePicture}` : null
+        }));
+        setFriends(formattedFriends);
+      } else {
+        console.error('Unexpected response format:', response.data);
+      }
     } catch (error) {
       console.error('Failed to fetch friends:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Error response:', error.response?.data);
+        console.error('Error status:', error.response?.status);
+      }
     }
   };
 
@@ -133,8 +148,12 @@ export default function MainScreen() {
       const response = await axios.get(`http://localhost:3002/api/users/search?query=${searchQuery}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      console.log('Search results:', response.data); // Add this line for debugging
-      setSearchResults(response.data);
+      console.log('Search results:', response.data);
+      const formattedResults = response.data.map((user: UserProfile) => ({
+        ...user,
+        profilePicture: user.profilePicture ? `http://localhost:3002${user.profilePicture}` : null
+      }));
+      setSearchResults(formattedResults);
     } catch (error) {
       console.error('Failed to search users:', error);
     }
@@ -143,30 +162,62 @@ export default function MainScreen() {
   const addFriend = async (friendId: string) => {
     try {
       const token = localStorage.getItem('token');
-      await axios.post('http://localhost:3002/api/friends/add', { friendId }, {
+      const response = await axios.post('http://localhost:3002/api/friends/add', { friendId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      fetchFriends();
+      
+      const newFriend = response.data;
+      const formattedNewFriend = {
+        id: friendId, // Ensure the id is included
+        ...newFriend,
+        profilePicture: newFriend.profilePicture ? `http://localhost:3002${newFriend.profilePicture}` : null
+      };
+      
+      setFriends(prevFriends => [...prevFriends, formattedNewFriend]);
     } catch (error) {
       console.error('Failed to add friend:', error);
+      if (axios.isAxiosError(error) && error.response) {
+        console.error('Error response:', error.response.data);
+        setRemoveMessage(`Failed to add friend: ${error.response.data.error || error.message}`);
+      } else {
+        setRemoveMessage('An unexpected error occurred while adding friend');
+      }
     }
   };
 
   const removeFriend = async (friend: Friend) => {
+    console.log('Attempting to remove friend:', friend);
+    if (!friend || typeof friend !== 'object') {
+      console.error('Invalid friend object:', friend);
+      setRemoveMessage('Invalid friend selected for removal');
+      return;
+    }
+    if (!friend.id) {
+      console.error('Friend object has no id:', friend);
+      setRemoveMessage('Friend object is missing an id');
+      return;
+    }
     setFriendToRemove(friend);
   };
 
   const confirmRemoveFriend = async () => {
-    if (!friendToRemove) return;
-
+    if (!friendToRemove || !friendToRemove.id) {
+      console.error('Invalid friend to remove:', friendToRemove);
+      setRemoveMessage('Invalid friend selected for removal');
+      return;
+    }
+  
+    console.log('Attempting to remove friend:', friendToRemove);
+  
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.delete(`http://localhost:3002/api/friends/${friendToRemove.friendId}`, {
+      console.log('Using token:', token ? 'Token exists' : 'No token found');
+      const response = await axios.delete(`http://localhost:3002/api/friends/${friendToRemove.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       console.log('Server response:', response.data);
       setRemoveMessage(response.data.message);
-      setFriends(friends.filter(f => f.friendId !== friendToRemove.friendId));
+      setFriends(friends.filter(f => f.id !== friendToRemove.id));
       setFriendToRemove(null);
       setTimeout(() => setRemoveMessage(null), 3000);
     } catch (error) {
@@ -388,7 +439,7 @@ export default function MainScreen() {
                       {searchResults.map((user) => (
                         <li key={user.id} className="flex items-center space-x-2 border-b pb-2">
                           <InteractableProfilePicture
-                            currentImage={user.profilePicture ? `http://localhost:3002${user.profilePicture}` : null}
+                            currentImage={user.profilePicture}
                             onImageChange={undefined}
                             onClick={() => fetchUserProfile(user.id)}
                           />
@@ -409,11 +460,11 @@ export default function MainScreen() {
                 <h3 className="font-bold mb-2">Your Friends:</h3>
                 <ul className="space-y-2">
                   {friends.map((friend) => (
-                    <li key={friend._id} className="flex items-center space-x-2 border-b pb-2">
+                    <li key={friend.id} className="flex items-center space-x-2 border-b pb-2">
                       <InteractableProfilePicture
-                        currentImage={friend.profilePicture ? `http://localhost:3002${friend.profilePicture}` : null}
+                        currentImage={friend.profilePicture}
                         onImageChange={undefined}
-                        onClick={() => friend.friendId && fetchUserProfile(friend.friendId)}
+                        onClick={() => friend.id && fetchUserProfile(friend.id)}
                       />
                       <span>{friend.name}</span>
                       <div className="ml-auto space-x-2">
