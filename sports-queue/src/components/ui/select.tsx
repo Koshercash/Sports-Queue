@@ -1,8 +1,8 @@
 'use client';
 
-import React, { createContext, useContext, useState } from 'react';
+import React from 'react';
 
-const SelectContext = createContext<{
+const SelectContext = React.createContext<{
   value: string;
   onChange: (value: string) => void;
   isOpen: boolean;
@@ -10,8 +10,8 @@ const SelectContext = createContext<{
 } | null>(null);
 
 export function Select({ onValueChange, children }: { onValueChange: (value: string) => void; children: React.ReactNode }) {
-  const [value, setValue] = useState('');
-  const [isOpen, setIsOpen] = useState(false);
+  const [value, setValue] = React.useState('');
+  const [isOpen, setIsOpen] = React.useState(false);
 
   const handleChange = (newValue: string) => {
     setValue(newValue);
@@ -27,7 +27,7 @@ export function Select({ onValueChange, children }: { onValueChange: (value: str
 }
 
 export function SelectTrigger({ children }: { children: React.ReactNode }) {
-  const context = useContext(SelectContext);
+  const context = React.useContext(SelectContext);
   if (!context) throw new Error('SelectTrigger must be used within a Select');
 
   return (
@@ -41,14 +41,14 @@ export function SelectTrigger({ children }: { children: React.ReactNode }) {
 }
 
 export function SelectValue({ placeholder }: { placeholder: string }) {
-  const context = useContext(SelectContext);
+  const context = React.useContext(SelectContext);
   if (!context) throw new Error('SelectValue must be used within a Select');
 
   return <span>{context.value || placeholder}</span>;
 }
 
 export function SelectContent({ children }: { children: React.ReactNode }) {
-  const context = useContext(SelectContext);
+  const context = React.useContext(SelectContext);
   if (!context) throw new Error('SelectContent must be used within a Select');
 
   if (!context.isOpen) return null;
@@ -61,7 +61,7 @@ export function SelectContent({ children }: { children: React.ReactNode }) {
 }
 
 export function SelectItem({ value, children }: { value: string; children: React.ReactNode }) {
-  const context = useContext(SelectContext);
+  const context = React.useContext(SelectContext);
   if (!context) throw new Error('SelectItem must be used within a Select');
 
   return (

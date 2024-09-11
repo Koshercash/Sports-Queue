@@ -5,14 +5,20 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const { MongoMemoryServer } = require('mongodb-memory-server');
+const multer = require('multer');
+const upload = multer({ dest: 'uploads/' });
+const path = require('path');
 
 const app = express();
 
 app.use(express.json());
 app.use(cors({
-  origin: 'http://localhost:3000', // or whatever port your frontend is running on
+  origin: 'http://localhost:3000', // make sure this matches your frontend URL
   credentials: true
 }));
+
+// Add this line after your other app.use() statements
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 async function startServer() {
   const mongod = await MongoMemoryServer.create();
@@ -34,6 +40,7 @@ async function startServer() {
     mmr11v11: Number,
     idPicture: String,
     dateOfBirth: Date,
+    profilePicturePath: String,
   });
 
   const User = mongoose.model('User', UserSchema);
@@ -43,6 +50,7 @@ async function startServer() {
     friend: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     status: { type: String, enum: ['pending', 'accepted', 'blocked'] }
   });
+
 
   const Friend = mongoose.model('Friend', FriendSchema);
 
@@ -54,10 +62,17 @@ async function startServer() {
 
   const Queue = mongoose.model('Queue', QueueSchema);
 
-  app.post('/api/register', async (req, res) => {
+  app.post('/api/register', upload.fields([
+    { name: 'profilePicture', maxCount: 1 },
+    { name: 'idPicture', maxCount: 1 }
+  ]), async (req, res) => {
     try {
       const { name, email, password, phone, sex, position, skillLevel, dateOfBirth } = req.body;
       
+      // Log received data for debugging
+      console.log('Received registration data:', { name, email, phone, sex, position, skillLevel, dateOfBirth });
+      console.log('Files:', req.files);
+
       // Check if user is over 16
       const dob = new Date(dateOfBirth);
       const today = new Date();
@@ -96,13 +111,16 @@ async function startServer() {
         mmr5v5: mmr,
         mmr11v11: mmr,
         dateOfBirth: dob,
+        profilePicturePath: req.files.profilePicture ? req.files.profilePicture[0].filename : null,
+        idPicture: req.files.idPicture ? req.files.idPicture[0].filename : null
       });
+
       await user.save();
       const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
       res.status(201).json({ token });
     } catch (error) {
-      console.error('Registration error:', error);
-      res.status(500).json({ error: 'Registration failed', details: error.message });
+      console.error('Detailed registration error:', error);
+      res.status(500).json({ error: 'Registration failed', details: error.message, stack: error.stack });
     }
   });
 
@@ -121,7 +139,8 @@ async function startServer() {
   });
 
   const authMiddleware = (req, res, next) => {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
+    const authHeader = req.header('Authorization');
+    const token = authHeader && authHeader.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
 
     try {
@@ -139,10 +158,22 @@ async function startServer() {
       if (!user) {
         return res.status(404).json({ error: 'User not found' });
       }
-      res.json(user);
+      res.json({
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        sex: user.sex,
+        position: user.position,
+        skillLevel: user.skillLevel,
+        dateOfBirth: user.dateOfBirth,
+        profilePicture: user.profilePicturePath ? `/uploads/${user.profilePicturePath}` : null,
+        mmr5v5: user.mmr5v5,
+        mmr11v11: user.mmr11v11
+      });
     } catch (error) {
       console.error('Error fetching user profile:', error);
-      res.status(500).json({ error: 'Failed to fetch user profile' });
+      res.status(500).json({ error: 'Failed to fetch user profile', details: error.message });
     }
   });
 
@@ -160,12 +191,22 @@ async function startServer() {
   app.get('/api/users/search', authMiddleware, async (req, res) => {
     try {
       const { query } = req.query;
+      console.log('Search query:', query);
       const users = await User.find({ 
         name: { $regex: query, $options: 'i' },
         _id: { $ne: req.userId }
-      }).select('name');
-      res.json(users);
+      }).select('name _id profilePicturePath');
+      
+      const formattedUsers = users.map(user => ({
+        id: user._id,
+        name: user.name,
+        profilePicture: user.profilePicturePath ? `/uploads/${user.profilePicturePath}` : null
+      }));
+      
+      console.log('Search results:', formattedUsers);
+      res.json(formattedUsers);
     } catch (error) {
+      console.error('Error searching users:', error);
       res.status(500).json({ error: 'Failed to search users' });
     }
   });
@@ -173,41 +214,75 @@ async function startServer() {
   app.post('/api/friends/add', authMiddleware, async (req, res) => {
     try {
       const { friendId } = req.body;
-      const newFriend = new Friend({
-        user: req.userId,
-        friend: friendId,
-        status: 'pending'
-      });
-      await newFriend.save();
-      res.status(201).json({ message: 'Friend request sent' });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to add friend' });
-    }
-  });
-
-  app.delete('/api/friends/remove', authMiddleware, async (req, res) => {
-    try {
-      const { friendId } = req.body;
-      await Friend.findOneAndDelete({
+      
+      // Check if friendship already exists
+      const existingFriendship = await Friend.findOne({
         $or: [
           { user: req.userId, friend: friendId },
           { user: friendId, friend: req.userId }
         ]
       });
-      res.json({ message: 'Friend removed' });
+
+      if (existingFriendship) {
+        return res.status(400).json({ error: 'Friendship already exists' });
+      }
+
+      const newFriend = new Friend({
+        user: req.userId,
+        friend: friendId,
+        status: 'accepted'
+      });
+      await newFriend.save();
+
+      // Add reverse friendship
+      const reverseFriend = new Friend({
+        user: friendId,
+        friend: req.userId,
+        status: 'accepted'
+      });
+      await reverseFriend.save();
+
+      res.status(201).json({ message: 'Friend added successfully' });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to remove friend' });
+      console.error('Error adding friend:', error);
+      res.status(500).json({ error: 'Failed to add friend' });
+    }
+  });
+
+  app.delete('/api/friends/:friendId', authMiddleware, async (req, res) => {
+    try {
+      const { friendId } = req.params;
+      console.log('Removing friend:', friendId, 'for user:', req.userId);
+      
+      const result = await Friend.deleteMany({
+        $or: [
+          { user: req.userId, friend: friendId },
+          { user: friendId, friend: req.userId }
+        ]
+      });
+
+      if (result.deletedCount > 0) {
+        console.log('Friend removed successfully');
+        res.json({ message: 'Friend removed successfully' });
+      } else {
+        console.log('Friendship not found');
+        res.status(404).json({ error: 'Friendship not found' });
+      }
+    } catch (error) {
+      console.error('Error removing friend:', error);
+      res.status(500).json({ error: 'Failed to remove friend', details: error.message });
     }
   });
 
   app.get('/api/friends', authMiddleware, async (req, res) => {
     try {
-      const friends = await Friend.find({
-        $or: [{ user: req.userId }, { friend: req.userId }],
-        status: 'accepted'
-      }).populate('user friend', 'name');
-      res.json(friends);
+      console.log('Fetching friends for user:', req.userId);
+      const friends = await Friend.find({ user: req.userId }).populate('friend', 'name');
+      const formattedFriends = friends.map(f => ({ id: f.friend._id, name: f.friend.name }));
+      console.log('Fetched friends:', formattedFriends);
+      res.json(formattedFriends);
     } catch (error) {
+      console.error('Error fetching friends:', error);
       res.status(500).json({ error: 'Failed to fetch friends' });
     }
   });
@@ -313,6 +388,153 @@ async function startServer() {
 
     return null;
   }
+
+  // Update the /api/user/:id endpoint
+  app.get('/api/user/:id', authMiddleware, async (req, res) => {
+    try {
+      console.log('Fetching user data for ID:', req.params.id);
+      const userId = req.params.id;
+      if (!userId) {
+        return res.status(400).json({ error: 'User ID is required' });
+      }
+
+      const user = await User.findById(userId);
+      
+      if (!user) {
+        console.log('User not found for ID:', userId);
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const isCurrentUser = req.userId === userId;
+
+      const userData = {
+        id: user._id.toString(), // Convert ObjectId to string
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        sex: user.sex,
+        position: user.position,
+        skillLevel: user.skillLevel,
+        dateOfBirth: user.dateOfBirth,
+        profilePicture: user.profilePicturePath ? `/uploads/${user.profilePicturePath}` : null,
+        isCurrentUser: isCurrentUser,
+        mmr5v5: user.mmr5v5,
+        mmr11v11: user.mmr11v11
+      };
+
+      console.log('Sending user data:', userData);
+      res.json(userData);
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+      res.status(500).json({ error: 'Internal server error', details: error.message });
+    }
+  });
+
+  // Update profile picture
+  app.post('/api/user/profile-picture', authMiddleware, upload.single('profilePicture'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+
+      const user = await User.findById(req.userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Update the user's profile picture
+      user.profilePicturePath = req.file.filename;
+      await user.save();
+
+      res.json({ message: 'Profile picture updated successfully', profilePicture: `/uploads/${req.file.filename}` });
+    } catch (error) {
+      console.error('Error updating profile picture:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Update the error handling middleware
+  app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).send('Something broke!');
+  });
+
+  // Add this just before your app.listen() call
+  app.use((req, res, next) => {
+    console.log(`404 - Not Found: ${req.method} ${req.originalUrl}`);
+    res.status(404).send("Sorry, that route doesn't exist.");
+  });
+
+  // Add this function to create sample users
+  async function createSampleUsers() {
+    const sampleUsers = [
+      { name: 'Alice', email: 'alice@example.com', password: 'password123', phone: '1234567890', sex: 'female', position: 'midfielder', skillLevel: 'intermediate', dateOfBirth: '1995-05-15' },
+      { name: 'Bob', email: 'bob@example.com', password: 'password123', phone: '2345678901', sex: 'male', position: 'striker', skillLevel: 'advanced', dateOfBirth: '1993-08-22' },
+      { name: 'Charlie', email: 'charlie@example.com', password: 'password123', phone: '3456789012', sex: 'male', position: 'goalkeeper', skillLevel: 'beginner', dateOfBirth: '1998-11-30' },
+    ];
+
+    for (const userData of sampleUsers) {
+      const existingUser = await User.findOne({ email: userData.email });
+      if (!existingUser) {
+        const hashedPassword = await bcrypt.hash(userData.password, 10);
+        const mmr = getMMRFromSkillLevel(userData.skillLevel);
+        const user = new User({
+          ...userData,
+          password: hashedPassword,
+          mmr5v5: mmr,
+          mmr11v11: mmr,
+          dateOfBirth: new Date(userData.dateOfBirth),
+        });
+        await user.save();
+        console.log(`Created sample user: ${userData.name}`);
+      }
+    }
+  }
+
+  // Call this function after connecting to the database
+  await createSampleUsers();
+
+  // Add this endpoint to send a dummy friend request
+  app.post('/api/friends/send-dummy-request', authMiddleware, async (req, res) => {
+    try {
+      const currentUser = await User.findById(req.userId);
+      const dummyFriend = await User.findOne({ name: 'Alice' });
+
+      if (!dummyFriend) {
+        return res.status(404).json({ error: 'Dummy friend not found' });
+      }
+
+      const existingFriendship = await Friend.findOne({
+        $or: [
+          { user: currentUser._id, friend: dummyFriend._id },
+          { user: dummyFriend._id, friend: currentUser._id }
+        ]
+      });
+
+      if (existingFriendship) {
+        return res.status(400).json({ error: 'Friendship already exists' });
+      }
+
+      const newFriend = new Friend({
+        user: currentUser._id,
+        friend: dummyFriend._id,
+        status: 'accepted'
+      });
+      await newFriend.save();
+
+      const reverseFriend = new Friend({
+        user: dummyFriend._id,
+        friend: currentUser._id,
+        status: 'accepted'
+      });
+      await reverseFriend.save();
+
+      res.status(201).json({ message: 'Dummy friend request sent and accepted' });
+    } catch (error) {
+      console.error('Error sending dummy friend request:', error);
+      res.status(500).json({ error: 'Failed to send dummy friend request' });
+    }
+  });
 
   const PORT = process.env.PORT || 3002;
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

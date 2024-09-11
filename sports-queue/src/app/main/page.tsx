@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -9,21 +9,25 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
+import { UserProfile } from '@/components/UserProfile';
+import { InteractableProfilePicture } from '@/components/InteractableProfilePicture';
+import Link from 'next/link';
 
 interface UserProfile {
-  _id: string;
+  id: string;
   name: string;
   position: string;
   skillLevel: string;
   mmr5v5: number;
   mmr11v11: number;
+  profilePicture: string | null;
 }
 
 interface Friend {
   _id: string;
-  user: UserProfile;
-  friend: UserProfile;
-  status: 'pending' | 'accepted' | 'blocked';
+  friendId: string;
+  name: string;
+  profilePicture: string | null;
 }
 
 interface MatchPlayer {
@@ -37,6 +41,21 @@ interface Match {
   team2: MatchPlayer[];
 }
 
+interface UserProfileData {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  sex: string;
+  position: string;
+  skillLevel: string;
+  dateOfBirth: string;
+  profilePicture: string | null;
+  isCurrentUser: boolean;
+  mmr5v5: number;
+  mmr11v11: number;
+}
+
 export default function MainScreen() {
   const [gameMode, setGameMode] = useState('5v5')
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
@@ -48,6 +67,10 @@ export default function MainScreen() {
   const [queueStatus, setQueueStatus] = useState<'idle' | 'queuing' | 'matched'>('idle');
   const [match, setMatch] = useState<Match | null>(null);
   const [dots, setDots] = useState('');
+
+  const [selectedProfile, setSelectedProfile] = useState<UserProfileData | null>(null);
+  const [removeMessage, setRemoveMessage] = useState<string | null>(null);
+  const [friendToRemove, setFriendToRemove] = useState<Friend | null>(null);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -94,9 +117,10 @@ export default function MainScreen() {
   const fetchFriends = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:3002/api/friends', {
+      const response = await axios.get<Friend[]>('http://localhost:3002/api/friends', {
         headers: { Authorization: `Bearer ${token}` }
       });
+      console.log('Fetched friends:', response.data); // Add this line for debugging
       setFriends(response.data);
     } catch (error) {
       console.error('Failed to fetch friends:', error);
@@ -109,6 +133,7 @@ export default function MainScreen() {
       const response = await axios.get(`http://localhost:3002/api/users/search?query=${searchQuery}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      console.log('Search results:', response.data); // Add this line for debugging
       setSearchResults(response.data);
     } catch (error) {
       console.error('Failed to search users:', error);
@@ -127,16 +152,33 @@ export default function MainScreen() {
     }
   };
 
-  const removeFriend = async (friendId: string) => {
+  const removeFriend = async (friend: Friend) => {
+    setFriendToRemove(friend);
+  };
+
+  const confirmRemoveFriend = async () => {
+    if (!friendToRemove) return;
+
     try {
       const token = localStorage.getItem('token');
-      await axios.delete('http://localhost:3002/api/friends/remove', {
-        headers: { Authorization: `Bearer ${token}` },
-        data: { friendId }
+      const response = await axios.delete(`http://localhost:3002/api/friends/${friendToRemove.friendId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-      fetchFriends();
+      console.log('Server response:', response.data);
+      setRemoveMessage(response.data.message);
+      setFriends(friends.filter(f => f.friendId !== friendToRemove.friendId));
+      setFriendToRemove(null);
+      setTimeout(() => setRemoveMessage(null), 3000);
     } catch (error) {
-      console.error('Failed to remove friend:', error);
+      console.error('Error removing friend:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Error response:', error.response?.data);
+        console.error('Error status:', error.response?.status);
+        setRemoveMessage(`Failed to remove friend: ${error.response?.data?.error || error.message}`);
+      } else {
+        console.error('Unexpected error:', error);
+        setRemoveMessage('An unexpected error occurred while removing friend');
+      }
     }
   };
 
@@ -156,6 +198,7 @@ export default function MainScreen() {
         }
       } catch (error) {
         console.error('Failed to join queue:', error);
+        alert('Failed to join queue. Please try again.');
       }
     } else if (queueStatus === 'queuing') {
       try {
@@ -168,6 +211,34 @@ export default function MainScreen() {
         setDots(''); // Reset dots when leaving queue
       } catch (error) {
         console.error('Failed to leave queue:', error);
+        alert('Failed to leave queue. Please try again.');
+      }
+    }
+  };
+
+  const fetchUserProfile = async (userId: string) => {
+    console.log('Fetching profile for user:', userId);
+    if (!userId) {
+      console.error('Invalid userId:', userId);
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      console.log('Using token:', token);
+      const response = await axios.get<UserProfileData>(`http://localhost:3002/api/user/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      console.log('Fetched user profile:', response.data);
+      setSelectedProfile(response.data);
+    } catch (error) {
+      console.error('Failed to fetch user profile:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Error response:', error.response?.data);
+        console.error('Error status:', error.response?.status);
+        setRemoveMessage(`Failed to load user data: ${error.response?.data?.error || error.message}`);
+      } else {
+        console.error('Unexpected error:', error);
+        setRemoveMessage('An unexpected error occurred while fetching user data');
       }
     }
   };
@@ -198,6 +269,13 @@ export default function MainScreen() {
       </header>
 
       <main className="p-4 pb-32">
+        {removeMessage && (
+          <div className="mb-4 p-4 border border-green-500 bg-green-50 rounded-md">
+            <h4 className="font-bold">Notification</h4>
+            <p>{removeMessage}</p>
+          </div>
+        )}
+
         <Tabs defaultValue="home">
           <TabsList className="grid w-full grid-cols-5 mb-4">
             <TabsTrigger value="home">Home</TabsTrigger>
@@ -226,10 +304,13 @@ export default function MainScreen() {
               </CardHeader>
               <CardContent>
                 <div className="flex items-center space-x-4 mb-4">
-                  <Avatar>
-                    <AvatarImage src="/placeholder-avatar.jpg" alt="Profile picture" />
-                    <AvatarFallback>{userProfile?.name.charAt(0) || 'U'}</AvatarFallback>
-                  </Avatar>
+                  <Link href={`/profile/${userProfile?.id}`}>
+                    <InteractableProfilePicture
+                      currentImage={userProfile?.profilePicture ? `http://localhost:3002${userProfile.profilePicture}` : null}
+                      onImageChange={undefined}
+                      priority={true}
+                    />
+                  </Link>
                   <div>
                     <h3 className="text-xl font-bold">{userProfile?.name || 'User Name'}</h3>
                     <p>Position: {userProfile?.position || 'Not set'}</p>
@@ -305,16 +386,18 @@ export default function MainScreen() {
                     <h3 className="font-bold mb-2">Search Results:</h3>
                     <ul className="space-y-2">
                       {searchResults.map((user) => (
-                        <li key={user._id} className="flex items-center space-x-2 border-b pb-2">
-                          <Avatar>
-                            <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
-                          </Avatar>
+                        <li key={user.id} className="flex items-center space-x-2 border-b pb-2">
+                          <InteractableProfilePicture
+                            currentImage={user.profilePicture ? `http://localhost:3002${user.profilePicture}` : null}
+                            onImageChange={undefined}
+                            onClick={() => fetchUserProfile(user.id)}
+                          />
                           <span>{user.name}</span>
                           <Button 
                             variant="outline" 
                             size="sm" 
                             className="ml-auto"
-                            onClick={() => addFriend(user._id)}
+                            onClick={() => addFriend(user.id)}
                           >
                             Add Friend
                           </Button>
@@ -325,27 +408,26 @@ export default function MainScreen() {
                 )}
                 <h3 className="font-bold mb-2">Your Friends:</h3>
                 <ul className="space-y-2">
-                  {friends.map((friend) => {
-                    const friendData = friend.user._id === userProfile?._id ? friend.friend : friend.user;
-                    return (
-                      <li key={friend._id} className="flex items-center space-x-2 border-b pb-2">
-                        <Avatar>
-                          <AvatarFallback>{friendData.name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <span>{friendData.name}</span>
-                        <div className="ml-auto space-x-2">
-                          <Button variant="outline" size="sm">Message</Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={() => removeFriend(friendData._id)}
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      </li>
-                    );
-                  })}
+                  {friends.map((friend) => (
+                    <li key={friend._id} className="flex items-center space-x-2 border-b pb-2">
+                      <InteractableProfilePicture
+                        currentImage={friend.profilePicture ? `http://localhost:3002${friend.profilePicture}` : null}
+                        onImageChange={undefined}
+                        onClick={() => friend.friendId && fetchUserProfile(friend.friendId)}
+                      />
+                      <span>{friend.name}</span>
+                      <div className="ml-auto space-x-2">
+                        <Button variant="outline" size="sm">Message</Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => removeFriend(friend)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </li>
+                  ))}
                 </ul>
               </CardContent>
             </Card>
@@ -399,6 +481,36 @@ export default function MainScreen() {
           </DialogContent>
         </Dialog>
       )}
+
+      {selectedProfile && (
+        <Dialog open={!!selectedProfile} onOpenChange={() => setSelectedProfile(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{selectedProfile.name}'s Profile</DialogTitle>
+            </DialogHeader>
+            <UserProfile
+              {...selectedProfile}
+              onProfilePictureChange={undefined}
+            />
+            <Button onClick={() => setSelectedProfile(null)}>Close</Button>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      <Dialog open={!!friendToRemove} onOpenChange={(open) => {
+        if (!open) setFriendToRemove(null);
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Friend</DialogTitle>
+          </DialogHeader>
+          <p>Are you sure you want to remove {friendToRemove?.name} from your friends list?</p>
+          <div className="flex justify-end space-x-2">
+            <Button variant="outline" onClick={() => setFriendToRemove(null)}>Cancel</Button>
+            <Button onClick={confirmRemoveFriend}>Confirm</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Button variant="link" className="absolute bottom-4 left-4">Home</Button>
     </div>
