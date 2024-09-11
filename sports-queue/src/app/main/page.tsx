@@ -125,10 +125,19 @@ export default function MainScreen() {
 
       if (response.data && Array.isArray(response.data)) {
         console.log('Fetched friends:', response.data);
-        const formattedFriends = response.data.map(friend => ({
-          ...friend,
-          profilePicture: friend.profilePicture ? `http://localhost:3002${friend.profilePicture}` : null
-        }));
+        const formattedFriends = response.data.map(friend => {
+          const formattedFriend = {
+            ...friend,
+            id: friend.id || `temp-${Date.now()}-${Math.random()}`,
+            profilePicture: friend.profilePicture 
+              ? friend.profilePicture.startsWith('http') 
+                ? friend.profilePicture 
+                : `http://localhost:3002${friend.profilePicture}`
+              : null
+          };
+          console.log('Formatted friend:', formattedFriend);
+          return formattedFriend;
+        });
         setFriends(formattedFriends);
       } else {
         console.error('Unexpected response format:', response.data);
@@ -167,13 +176,24 @@ export default function MainScreen() {
       });
       
       const newFriend = response.data;
+      console.log('New friend data from API:', newFriend);
+
+      // Find the user in searchResults to get their profile picture
+      const friendFromSearch = searchResults.find(user => user.id === friendId);
+      console.log('Friend data from search results:', friendFromSearch);
+
       const formattedNewFriend = {
-        id: friendId, // Ensure the id is included
-        ...newFriend,
-        profilePicture: newFriend.profilePicture ? `http://localhost:3002${newFriend.profilePicture}` : null
+        id: friendId,
+        name: newFriend.name,
+        profilePicture: friendFromSearch?.profilePicture || newFriend.profilePicture || null,
       };
       
+      console.log('Formatted new friend:', formattedNewFriend);
       setFriends(prevFriends => [...prevFriends, formattedNewFriend]);
+      
+      // Clear search results after adding a friend
+      setSearchResults([]);
+      setSearchQuery('');
     } catch (error) {
       console.error('Failed to add friend:', error);
       if (axios.isAxiosError(error) && error.response) {
@@ -293,6 +313,16 @@ export default function MainScreen() {
       }
     }
   };
+
+  useEffect(() => {
+    console.log('Current friends state:', friends);
+    friends.forEach(friend => {
+      console.log(`Friend ${friend.name}:`, {
+        id: friend.id,
+        profilePicture: friend.profilePicture
+      });
+    });
+  }, [friends]);
 
   return (
     <div className="min-h-screen bg-white text-black relative">
@@ -462,7 +492,7 @@ export default function MainScreen() {
                   {friends.map((friend) => (
                     <li key={friend.id} className="flex items-center space-x-2 border-b pb-2">
                       <InteractableProfilePicture
-                        currentImage={friend.profilePicture}
+                        currentImage={friend.profilePicture || null}
                         onImageChange={undefined}
                         onClick={() => friend.id && fetchUserProfile(friend.id)}
                       />

@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-import { ObjectId } from 'mongodb';
+import { Db, ObjectId } from 'mongodb';
 import { connectToDatabase } from '../../../utils/mongodb';
 import { authMiddleware } from '../../../utils/auth';
 
@@ -25,34 +25,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const { db } = await connectToDatabase();
 
-    const friendships = await db.collection('friends').find({
-      user: new ObjectId(userId)
-    }).toArray();
-
-    console.log('Friendships:', friendships);
-
-    const friendIds = friendships.map(f => new ObjectId(f.friend));
-
-    const friends = await db.collection('users').find({
-      _id: { $in: friendIds }
-    }).toArray();
-
-    console.log('Raw friends from database:', friends);
-
-    const formattedFriends = friends.map(friend => {
-      console.log('Formatting friend:', friend);
-      return {
-        id: friend._id.toString(),
-        name: friend.name,
-        profilePicture: friend.profilePicture || null
-      };
-    });
-
-    console.log('Formatted friends:', formattedFriends);
-
+    const friends = await fetchFriendsFromDatabase(db, userId);
+    const formattedFriends = friends.map(friend => ({
+      id: friend._id.toString(),
+      name: friend.name,
+      profilePicture: friend.profilePicture 
+        ? `http://localhost:3002${friend.profilePicture}`
+        : null,
+      // ... other friend properties ...
+    }));
+    console.log('Sending friends data:', formattedFriends); // Add this log
     res.status(200).json(formattedFriends);
   } catch (error) {
     console.error('Error fetching friends:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+}
+
+async function fetchFriendsFromDatabase(db: Db, userId: string) {
+  const friendships = await db.collection('friends').find({
+    user: new ObjectId(userId)
+  }).toArray();
+
+  const friendIds = friendships.map(f => new ObjectId(f.friend));
+
+  const friends = await db.collection('users').find({
+    _id: { $in: friendIds }
+  }).toArray();
+
+  return friends;
 }
