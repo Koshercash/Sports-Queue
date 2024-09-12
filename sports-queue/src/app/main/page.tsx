@@ -96,6 +96,8 @@ export default function MainScreen() {
 
   const [activeTab, setActiveTab] = useState('home');
 
+  const [infoDialogOpen, setInfoDialogOpen] = useState(false);
+
   const handleTabChange = (value: string) => {
     setActiveTab(value);
     if (value === 'friends') {
@@ -397,30 +399,30 @@ export default function MainScreen() {
   return (
     <div className="min-h-screen bg-white text-black relative overflow-hidden">
       {activeTab === 'home' && <div className={styles.backgroundText}></div>}
-      <header className="relative z-10 flex justify-between items-center p-4 bg-green-500 text-white">
+      <header className="relative z-20 flex justify-between items-center p-4 bg-green-500 text-white">
         <h1 className="text-2xl font-bold">Sports Queue</h1>
-        <Dialog>
+        <Dialog open={infoDialogOpen} onOpenChange={setInfoDialogOpen}>
           <DialogTrigger asChild>
-            <Button variant="outline" className="text-white border-white hover:bg-green-600">Info</Button>
+            <Button variant="outline" className="text-white border-white hover:bg-green-600" onClick={() => setInfoDialogOpen(true)}>Info</Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px]">
+          <DialogContent className="sm:max-w-[425px] z-50">
             <DialogHeader>
               <DialogTitle>Welcome to Sports Queue!</DialogTitle>
+              <DialogDescription>
+                <p className="mb-2">The best way to find your individual skill level, and quickly find competitive games near you.</p>
+                <h3 className="font-bold mt-4 mb-2">Rules:</h3>
+                <p className="mb-2">Sports Queue is entirely player ran, so it costs no money. However, for games you will need a red or blue jersey/penny or clothes to easily tell teams apart!</p>
+                <p className="mb-2">To make sure game scores are correctly reported, enter the correct game score after the game, after 30 minutes the game will be concluded, and the highest vote will be used.</p>
+                <h3 className="font-bold mt-4 mb-2">Cheating/Unfair Play:</h3>
+                <p className="mb-2">If you are reported by 3 or more players in a single game, or excessively reported over multiple, action will be taken. This can be for excessive fouling, breaking the rules of the game, or harassing a player. Any physical fights or purposely conspiring to report the wrong score will be met with a permanent ban.</p>
+                <p className="mb-2">Try to limit the roughness, focus on your skills as well as positioning and having fun! People may want to play many games so please do your best to not injure anyone else.</p>
+              </DialogDescription>
             </DialogHeader>
-            <DialogDescription>
-              <p className="mb-2">The best way to find your individual skill level, and quickly find competitive games near you.</p>
-              <h3 className="font-bold mt-4 mb-2">Rules:</h3>
-              <p className="mb-2">Sports Queue is entirely player ran, so it costs no money. However, for games you will need a red or blue jersey/penny or clothes to easily tell teams apart!</p>
-              <p className="mb-2">To make sure game scores are correctly reported, enter the correct game score after the game, after 30 minutes the game will be concluded, and the highest vote will be used.</p>
-              <h3 className="font-bold mt-4 mb-2">Cheating/Unfair Play:</h3>
-              <p className="mb-2">If you are reported by 3 or more players in a single game, or excessively reported over multiple, action will be taken. This can be for excessive fouling, breaking the rules of the game, or harassing a player. Any physical fights or purposely conspiring to report the wrong score will be met with a permanent ban.</p>
-              <p className="mb-2">Try to limit the roughness, focus on your skills as well as positioning and having fun! People may want to play many games so please do your best to not injure anyone else.</p>
-            </DialogDescription>
           </DialogContent>
         </Dialog>
       </header>
 
-      <main className="relative z-10 p-4 pb-32">
+      <main className="relative z-10 p-4 pb-32 overflow-y-auto h-[calc(100vh-180px)]">
         {removeMessage && (
           <div className="mb-4 p-4 border border-green-500 bg-green-50 rounded-md">
             <h4 className="font-bold">Notification</h4>
@@ -525,7 +527,7 @@ export default function MainScreen() {
               </CardContent>
             </Card>
           </TabsContent>
-          <TabsContent value="friends">
+          <TabsContent value="friends" className="h-[calc(100vh-260px)] overflow-y-auto">
             <Card>
               <CardHeader>
                 <CardTitle>Friends</CardTitle>
@@ -582,29 +584,31 @@ export default function MainScreen() {
                     onChange={(e) => setFriendSearchQuery(e.target.value)}
                   />
                 </div>
-                <h3 className="font-bold mb-2">Your Friends:</h3>
-                <ul className="space-y-2">
-                  {filteredFriends.map((friend) => (
-                    <li key={friend.id} className="flex items-center space-x-2 border-b pb-2">
-                      <InteractableProfilePicture
-                        currentImage={friend.profilePicture || null}
-                        onImageChange={undefined}
-                        onClick={() => friend.id && fetchUserProfile(friend.id)}
-                      />
-                      <span className="font-semibold">{friend.name}</span>
-                      <div className="ml-auto space-x-2">
-                        <Button variant="outline" size="sm">Message</Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          onClick={() => removeFriend(friend)}
-                        >
-                          Remove
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <div className="space-y-4 overflow-y-auto max-h-[calc(100vh-400px)]">
+                  <h3 className="font-bold mb-2">Your Friends:</h3>
+                  <ul className="space-y-2">
+                    {filteredFriends.map((friend) => (
+                      <li key={friend.id} className="flex items-center space-x-2 border-b pb-2">
+                        <InteractableProfilePicture
+                          currentImage={friend.profilePicture || null}
+                          onImageChange={undefined}
+                          onClick={() => friend.id && fetchUserProfile(friend.id)}
+                        />
+                        <span className="font-semibold">{friend.name}</span>
+                        <div className="ml-auto space-x-2">
+                          <Button variant="outline" size="sm">Message</Button>
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => removeFriend(friend)}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
 
                 {pendingRequests.length > 0 && (
                   <div className="mt-4">
@@ -637,23 +641,25 @@ export default function MainScreen() {
         </Tabs>
       </main>
 
-      <div className="absolute bottom-8 left-0 right-0 flex flex-col items-center space-y-4">
-        <Button 
-          className="w-64 h-16 text-2xl bg-green-500 hover:bg-green-600 text-white border-2 border-black"
-          onClick={toggleQueue}
-          disabled={queueStatus === 'matched'}
-        >
-          {queueStatus === 'idle' ? 'Play' : queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!'}
-        </Button>
-        <Button 
-          variant="outline" 
-          className="text-sm"
-          onClick={() => setGameMode(gameMode === '5v5' ? '11v11' : '5v5')}
-          disabled={queueStatus !== 'idle'}
-        >
-          Game Mode: {gameMode}
-        </Button>
-      </div>
+      {!infoDialogOpen && (
+        <div className="fixed bottom-8 left-0 right-0 flex flex-col items-center space-y-4 z-30">
+          <Button 
+            className="w-64 h-16 text-2xl bg-green-500 hover:bg-green-600 text-white border-2 border-black"
+            onClick={toggleQueue}
+            disabled={queueStatus === 'matched'}
+          >
+            {queueStatus === 'idle' ? 'Play' : queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!'}
+          </Button>
+          <Button 
+            variant="outline" 
+            className="text-sm"
+            onClick={() => setGameMode(gameMode === '5v5' ? '11v11' : '5v5')}
+            disabled={queueStatus !== 'idle'}
+          >
+            Game Mode: {gameMode}
+          </Button>
+        </div>
+      )}
 
       {match && (
         <Dialog 
