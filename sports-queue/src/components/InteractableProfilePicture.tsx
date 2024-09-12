@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import Image from 'next/image';
 
 interface InteractableProfilePictureProps {
@@ -14,18 +14,17 @@ export const InteractableProfilePicture: React.FC<InteractableProfilePictureProp
   currentImage,
   onImageChange,
   onClick,
-  priority = false,
-  isFriend = false,
-  onRemoveFriend
+  priority = false
 }) => {
+  console.log('InteractableProfilePicture received image:', currentImage);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // const [friend, setFriend] = useState(isFriend);
 
   const handleClick = () => {
     if (onClick) {
       onClick();
-    } else if (onImageChange) {
-      fileInputRef.current?.click();
+    } else if (onImageChange && fileInputRef.current) {
+      fileInputRef.current.click();
     }
   };
 
@@ -36,50 +35,29 @@ export const InteractableProfilePicture: React.FC<InteractableProfilePictureProp
     }
   };
 
-  const handleRemoveFriend = () => {
-    if (onRemoveFriend) {
-      onRemoveFriend();
-      // setFriend(false);
-    }
-  };
-
   return (
-    <div className="relative">
-      <div onClick={handleClick} className="cursor-pointer">
-        {currentImage ? (
-          <div className="relative w-24 h-24">
-            <Image
-              src={currentImage}
-              alt="Profile Picture"
-              fill
-              sizes="(max-width: 96px) 100vw, 96px"
-              style={{ objectFit: 'cover' }}
-              className="rounded-full"
-              priority={priority}
-            />
-          </div>
-        ) : (
-          <div className="w-24 h-24 bg-gray-200 rounded-full flex items-center justify-center">
-            <span className="text-gray-500">Add Photo</span>
-          </div>
-        )}
-        {onImageChange && (
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            accept="image/*"
-            className="hidden"
-          />
-        )}
-      </div>
-      {isFriend && onRemoveFriend && (
-        <button
-          onClick={handleRemoveFriend}
-          className="absolute top-0 right-0 bg-red-500 text-white rounded-full p-1 text-xs"
-        >
-          Remove
-        </button>
+    <div className="relative w-20 h-20 rounded-full overflow-hidden cursor-pointer" onClick={handleClick}>
+      {currentImage ? (
+        <Image
+          src={currentImage}
+          alt="Profile"
+          layout="fill"
+          objectFit="cover"
+          priority={priority}
+        />
+      ) : (
+        <div className="w-full h-full bg-gray-300 flex items-center justify-center">
+          <span className="text-gray-500">No Image</span>
+        </div>
+      )}
+      {onImageChange && (
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          accept="image/*"
+          className="hidden"
+        />
       )}
     </div>
   );

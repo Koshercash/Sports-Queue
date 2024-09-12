@@ -71,6 +71,12 @@ export default function MainScreen() {
   const [removeMessage, setRemoveMessage] = useState<string | null>(null);
   const [friendToRemove, setFriendToRemove] = useState<Friend | null>(null);
 
+  // Add a new state for friends search query
+  const [friendSearchQuery, setFriendSearchQuery] = useState('');
+
+  // Add this near the top of your component
+  const [isSearchResultsVisible, setIsSearchResultsVisible] = useState(true);
+
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (queueStatus === 'queuing') {
@@ -116,40 +122,50 @@ export default function MainScreen() {
   const fetchFriends = async () => {
     try {
       const token = localStorage.getItem('token');
-      console.log('Token:', token ? 'exists' : 'not found');
-
       const response = await axios.get<Friend[]>('http://localhost:3002/api/friends', {
         headers: { Authorization: `Bearer ${token}` }
       });
-      console.log('Full API response:', response);
-
+      
+      console.log('Raw friends data from server:', response.data);
+      
       if (response.data && Array.isArray(response.data)) {
-        console.log('Fetched friends:', response.data);
         const formattedFriends = response.data.map(friend => {
+          console.log('Processing friend:', friend);
           const formattedFriend = {
             ...friend,
-            id: friend.id || `temp-${Date.now()}-${Math.random()}`,
-            profilePicture: friend.profilePicture 
-              ? friend.profilePicture.startsWith('http') 
-                ? friend.profilePicture 
+            id: friend.id,
+            name: friend.name,
+            profilePicture: friend.profilePicture
+              ? friend.profilePicture.startsWith('http')
+                ? friend.profilePicture
                 : `http://localhost:3002${friend.profilePicture}`
               : null
           };
           console.log('Formatted friend:', formattedFriend);
           return formattedFriend;
         });
-        setFriends(formattedFriends);
+        console.log('All formatted friends:', formattedFriends);
+        setFriends(prevFriends => {
+          const updatedFriends = formattedFriends.map(newFriend => {
+            const existingFriend = prevFriends.find(f => f.id === newFriend.id);
+            return existingFriend?.profilePicture ? { ...newFriend, profilePicture: existingFriend.profilePicture } : newFriend;
+          });
+          return updatedFriends;
+        });
       } else {
         console.error('Unexpected response format:', response.data);
+        setFriends([]);
       }
     } catch (error) {
       console.error('Failed to fetch friends:', error);
-      if (axios.isAxiosError(error)) {
-        console.error('Error response:', error.response?.data);
-        console.error('Error status:', error.response?.status);
-      }
+      setFriends([]);
     }
   };
+
+  // Add this useEffect to call fetchFriends on component mount
+  useEffect(() => {
+    fetchFriends();
+  }, []);
 
   const searchUsers = async () => {
     try {
@@ -157,11 +173,17 @@ export default function MainScreen() {
       const response = await axios.get(`http://localhost:3002/api/users/search?query=${searchQuery}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      console.log('Search results:', response.data);
-      const formattedResults = response.data.map((user: UserProfile) => ({
-        ...user,
-        profilePicture: user.profilePicture ? `http://localhost:3002${user.profilePicture}` : null
-      }));
+      const formattedResults = response.data
+        .map((user: UserProfile) => ({
+          ...user,
+          profilePicture: user.profilePicture 
+            ? user.profilePicture.startsWith('http')
+              ? user.profilePicture
+              : `http://localhost:3002${user.profilePicture}`
+            : null
+        }))
+        .filter((user: UserProfile) => !friends.some(friend => friend.id === user.id));
+      console.log('Formatted search results:', formattedResults);
       setSearchResults(formattedResults);
     } catch (error) {
       console.error('Failed to search users:', error);
@@ -175,33 +197,35 @@ export default function MainScreen() {
         headers: { Authorization: `Bearer ${token}` }
       });
       
+      console.log('Server response for adding friend:', response.data);
+
+      if (response.data.error === 'Friendship already exists') {
+        setRemoveMessage('This user is already your friend.');
+        return;
+      }
+
       const newFriend = response.data;
-      console.log('New friend data from API:', newFriend);
-
-      // Find the user in searchResults to get their profile picture
       const friendFromSearch = searchResults.find(user => user.id === friendId);
-      console.log('Friend data from search results:', friendFromSearch);
-
+      
       const formattedNewFriend = {
         id: friendId,
-        name: newFriend.name,
-        profilePicture: friendFromSearch?.profilePicture || newFriend.profilePicture || null,
+        name: newFriend.name || friendFromSearch?.name,
+        profilePicture: friendFromSearch?.profilePicture || newFriend.profilePicture || null
       };
       
-      console.log('Formatted new friend:', formattedNewFriend);
-      setFriends(prevFriends => [...prevFriends, formattedNewFriend]);
+      if (formattedNewFriend.profilePicture && !formattedNewFriend.profilePicture.startsWith('http')) {
+        formattedNewFriend.profilePicture = `http://localhost:3002${formattedNewFriend.profilePicture}`;
+      }
       
-      // Clear search results after adding a friend
-      setSearchResults([]);
+      console.log('Formatted new friend to be added:', formattedNewFriend);
+      setFriends(prevFriends => [...prevFriends, formattedNewFriend]);
+      setSearchResults(prevResults => prevResults.filter(user => user.id !== friendId));
       setSearchQuery('');
+      
+      console.log('Updated friends list:', [...friends, formattedNewFriend]);
     } catch (error) {
       console.error('Failed to add friend:', error);
-      if (axios.isAxiosError(error) && error.response) {
-        console.error('Error response:', error.response.data);
-        setRemoveMessage(`Failed to add friend: ${error.response.data.error || error.message}`);
-      } else {
-        setRemoveMessage('An unexpected error occurred while adding friend');
-      }
+      setRemoveMessage('Failed to add friend. Please try again.');
     }
   };
 
@@ -323,6 +347,27 @@ export default function MainScreen() {
       });
     });
   }, [friends]);
+
+  // Add a function to filter friends based on the search query
+  const filteredFriends = friends.filter(friend => 
+    friend.name.toLowerCase().includes(friendSearchQuery.toLowerCase())
+  );
+
+  useEffect(() => {
+    console.log('Friends state updated:', friends);
+  }, [friends]);
+
+  useEffect(() => {
+    localStorage.setItem('friends', JSON.stringify(friends));
+  }, [friends]);
+
+  // Add this at the beginning of the MainScreen component
+  useEffect(() => {
+    const storedFriends = localStorage.getItem('friends');
+    if (storedFriends) {
+      setFriends(JSON.parse(storedFriends));
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-white text-black relative">
@@ -461,6 +506,15 @@ export default function MainScreen() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                   <Button onClick={searchUsers}>Search</Button>
+                  {searchResults.length > 0 && (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => setSearchResults([])}
+                    >
+                      X
+                    </Button>
+                  )}
                 </div>
                 {searchResults.length > 0 && (
                   <div className="mb-4">
@@ -487,16 +541,24 @@ export default function MainScreen() {
                     </ul>
                   </div>
                 )}
+                {/* Add new search bar for friends list */}
+                <div className="mb-4">
+                  <Input 
+                    placeholder="Filter friends" 
+                    value={friendSearchQuery}
+                    onChange={(e) => setFriendSearchQuery(e.target.value)}
+                  />
+                </div>
                 <h3 className="font-bold mb-2">Your Friends:</h3>
                 <ul className="space-y-2">
-                  {friends.map((friend) => (
+                  {filteredFriends.map((friend) => (
                     <li key={friend.id} className="flex items-center space-x-2 border-b pb-2">
                       <InteractableProfilePicture
                         currentImage={friend.profilePicture || null}
                         onImageChange={undefined}
                         onClick={() => friend.id && fetchUserProfile(friend.id)}
                       />
-                      <span>{friend.name}</span>
+                      <span className="font-semibold">{friend.name}</span>
                       <div className="ml-auto space-x-2">
                         <Button variant="outline" size="sm">Message</Button>
                         <Button 
