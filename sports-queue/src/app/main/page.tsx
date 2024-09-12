@@ -13,6 +13,7 @@ import { UserProfile } from '@/components/UserProfile';
 import { InteractableProfilePicture } from '../../components/InteractableProfilePicture';
 import Link from 'next/link';
 import styles from './styles.module.css';
+import GameScreen from '../game/page';
 
 interface UserProfile {
   id: string;
@@ -37,6 +38,7 @@ interface MatchPlayer {
   id: string;
   name: string;
   position: string;
+  profilePicture?: string | null;
 }
 
 interface Match {
@@ -64,7 +66,7 @@ interface PendingRequest {
 }
 
 export default function MainScreen() {
-  const [gameMode, setGameMode] = useState('5v5')
+  const [gameMode, setGameMode] = useState<'5v5' | '11v11'>('5v5')
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [friends, setFriends] = useState<Friend[]>([])
   const [searchResults, setSearchResults] = useState<UserProfile[]>([])
@@ -98,6 +100,8 @@ export default function MainScreen() {
   const [activeTab, setActiveTab] = useState('home');
 
   const [infoDialogOpen, setInfoDialogOpen] = useState(false);
+
+  const [matchStarted, setMatchStarted] = useState(false);
 
   const handleTabChange = (value: string) => {
     setActiveTab(value);
@@ -456,6 +460,25 @@ export default function MainScreen() {
     }
   };
 
+  const handleStartMatch = () => {
+    setMatchStarted(true);
+  };
+
+  if (matchStarted && match) {
+    return (
+      <GameScreen
+        mode={gameMode}
+        players={[...match.team1, ...match.team2].map(player => ({
+          id: player.id,
+          name: player.name,
+          position: player.position,
+          team: match.team1.some(t => t.id === player.id) ? 'blue' : 'red',
+          profilePicture: player.profilePicture || null
+        }))}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white text-black relative overflow-hidden">
       {activeTab === 'home' && <div className={styles.backgroundText}></div>}
@@ -736,6 +759,7 @@ export default function MainScreen() {
                 ))}
               </ul>
             </div>
+            <Button onClick={handleStartMatch}>Start Match</Button>
           </DialogContent>
         </Dialog>
       )}
