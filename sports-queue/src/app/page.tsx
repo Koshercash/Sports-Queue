@@ -226,9 +226,10 @@ export default function LoginScreen() {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
       console.log('Fetched friends:', response.data);
-      setFriends(response.data);
+      setFriends(Array.isArray(response.data) ? response.data : []);
     } catch (error) {
       console.error('Error fetching friends:', error);
+      setFriends([]);
     }
   };
 
@@ -335,19 +336,23 @@ export default function LoginScreen() {
       {isLoggedIn && (
         <div className="mt-4">
           <h2>Friends List</h2>
-          {friends.map(friend => (
-            <div key={friend.id} className="flex items-center justify-between">
-              <span>{friend.name}</span>
-              <Button 
-                onClick={() => handleAddFriend(friend.id)} 
-                disabled={addingFriend === friend.id}
-                className={`transition-all duration-300 ${addingFriend === friend.id ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                {addingFriend === friend.id ? 'Adding...' : 'Add Friend'}
-              </Button>
-              <Button onClick={() => handleRemoveFriend(friend.id)}>Remove Friend</Button>
-            </div>
-          ))}
+          {Array.isArray(friends) && friends.length > 0 ? (
+            friends.map(friend => (
+              <div key={friend.id} className="flex items-center justify-between">
+                <span>{friend.name}</span>
+                <Button 
+                  onClick={() => handleAddFriend(friend.id)} 
+                  disabled={addingFriend === friend.id}
+                  className={`transition-all duration-300 ${addingFriend === friend.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {addingFriend === friend.id ? 'Adding...' : 'Add Friend'}
+                </Button>
+                <Button onClick={() => handleRemoveFriend(friend.id)}>Remove Friend</Button>
+              </div>
+            ))
+          ) : (
+            <div>No friends available.</div>
+          )}
         </div>
       )}
     </div>

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { UserProfile } from '@/components/UserProfile';
-import { FriendsList } from '@/components/FriendsList';
+import { FriendsList, Friend } from '@/components/FriendsList';
 import axios from 'axios';
 import { useRouter } from 'next/navigation';
 
@@ -22,7 +22,7 @@ interface UserData {
 
 export default function DashboardPage() {
   const [userData, setUserData] = useState<UserData | null>(null);
-  const [friends, setFriends] = useState<any[]>([]);
+  const [friends, setFriends] = useState<Friend[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -41,7 +41,7 @@ export default function DashboardPage() {
         const userResponse = await axios.get<UserData>('http://localhost:3002/api/user-profile');
         setUserData(userResponse.data);
 
-        const friendsResponse = await axios.get('http://localhost:3002/api/friends');
+        const friendsResponse = await axios.get<Friend[]>('http://localhost:3002/api/friends');
         setFriends(friendsResponse.data);
       } catch (error) {
         console.error('Error fetching data:', error);
@@ -76,6 +76,21 @@ export default function DashboardPage() {
     }
   };
 
+  const handleRemoveFriend = async (friendId: string) => {
+    try {
+      await axios.delete(`http://localhost:3002/api/friends/${friendId}`);
+      setFriends(friends.filter(friend => friend.id !== friendId));
+    } catch (error) {
+      console.error('Error removing friend:', error);
+      alert('Failed to remove friend. Please try again.');
+    }
+  };
+
+  const handleFriendClick = (friendId: string) => {
+    // Implement the logic for friend click, e.g., navigate to friend's profile
+    console.log(`Friend clicked: ${friendId}`);
+  };
+
   if (loading) {
     return <div>Loading...</div>;
   }
@@ -95,7 +110,15 @@ export default function DashboardPage() {
         isCurrentUser={true}
         onProfilePictureChange={handleProfilePictureChange}
       />
-      <FriendsList friends={friends} />
+      {Array.isArray(friends) ? (
+        <FriendsList 
+          friends={friends} 
+          onRemoveFriend={handleRemoveFriend}
+          onFriendClick={handleFriendClick}
+        />
+      ) : (
+        <div>No friends data available.</div>
+      )}
     </div>
   );
 }
