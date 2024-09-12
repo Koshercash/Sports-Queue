@@ -48,7 +48,7 @@ async function startServer() {
   const FriendSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     friend: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    status: { type: String, enum: ['pending', 'accepted', 'blocked'] }
+    status: { type: String, enum: ['pending', 'accepted', 'rejected'] }
   });
 
 
@@ -224,28 +224,52 @@ async function startServer() {
       });
 
       if (existingFriendship) {
-        return res.status(400).json({ error: 'Friendship already exists' });
+        return res.status(400).json({ error: 'Friendship already exists or pending' });
       }
 
       const newFriend = new Friend({
         user: req.userId,
         friend: friendId,
-        status: 'accepted'
+        status: 'pending'
       });
       await newFriend.save();
 
-      // Add reverse friendship
-      const reverseFriend = new Friend({
+      res.status(201).json({ message: 'Friend request sent successfully' });
+    } catch (error) {
+      console.error('Error adding friend:', error);
+      res.status(500).json({ error: 'Failed to send friend request' });
+    }
+  });
+
+  app.post('/api/friends/accept', authMiddleware, async (req, res) => {
+    try {
+      const { friendId } = req.body;
+      
+      const friendRequest = await Friend.findOne({
         user: friendId,
         friend: req.userId,
+        status: 'pending'
+      });
+
+      if (!friendRequest) {
+        return res.status(404).json({ error: 'Friend request not found' });
+      }
+
+      friendRequest.status = 'accepted';
+      await friendRequest.save();
+
+      // Create reverse friendship
+      const reverseFriend = new Friend({
+        user: req.userId,
+        friend: friendId,
         status: 'accepted'
       });
       await reverseFriend.save();
 
-      res.status(201).json({ message: 'Friend added successfully' });
+      res.json({ message: 'Friend request accepted' });
     } catch (error) {
-      console.error('Error adding friend:', error);
-      res.status(500).json({ error: 'Failed to add friend' });
+      console.error('Error accepting friend request:', error);
+      res.status(500).json({ error: 'Failed to accept friend request' });
     }
   });
 
@@ -277,10 +301,35 @@ async function startServer() {
   app.get('/api/friends', authMiddleware, async (req, res) => {
     try {
       console.log('Fetching friends for user:', req.userId);
-      const friends = await Friend.find({ user: req.userId }).populate('friend', 'name');
-      const formattedFriends = friends.map(f => ({ id: f.friend._id, name: f.friend.name }));
+      const friends = await Friend.find({ 
+        $or: [
+          { user: req.userId, status: 'accepted' },
+          { friend: req.userId, status: 'accepted' }
+        ]
+      }).populate('user friend', 'name profilePicturePath');
+      
+      const pendingRequests = await Friend.find({
+        friend: req.userId,
+        status: 'pending'
+      }).populate('user', 'name profilePicturePath');
+
+      const formattedFriends = friends.map(f => ({
+        id: f.user._id.toString() === req.userId ? f.friend._id : f.user._id,
+        name: f.user._id.toString() === req.userId ? f.friend.name : f.user.name,
+        profilePicture: f.user._id.toString() === req.userId ? 
+          (f.friend.profilePicturePath ? `/uploads/${f.friend.profilePicturePath}` : null) :
+          (f.user.profilePicturePath ? `/uploads/${f.user.profilePicturePath}` : null)
+      }));
+
+      const formattedPendingRequests = pendingRequests.map(r => ({
+        id: r.user._id,
+        name: r.user.name,
+        profilePicture: r.user.profilePicturePath ? `/uploads/${r.user.profilePicturePath}` : null
+      }));
+
       console.log('Fetched friends:', formattedFriends);
-      res.json(formattedFriends);
+      console.log('Fetched pending requests:', formattedPendingRequests);
+      res.json({ friends: formattedFriends, pendingRequests: formattedPendingRequests });
     } catch (error) {
       console.error('Error fetching friends:', error);
       res.status(500).json({ error: 'Failed to fetch friends' });

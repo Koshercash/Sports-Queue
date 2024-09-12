@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 import { UserProfile } from '@/components/UserProfile';
 import { InteractableProfilePicture } from '../../components/InteractableProfilePicture';
 import Link from 'next/link';
+import styles from './styles.module.css';
 
 interface UserProfile {
   id: string;
@@ -55,6 +56,12 @@ interface UserProfileData {
   mmr11v11: number;
 }
 
+interface PendingRequest {
+  id: string;
+  name: string;
+  profilePicture: string | null;
+}
+
 export default function MainScreen() {
   const [gameMode, setGameMode] = useState('5v5')
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
@@ -76,6 +83,25 @@ export default function MainScreen() {
 
   // Add this near the top of your component
   const [isSearchResultsVisible, setIsSearchResultsVisible] = useState(true);
+
+  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
+
+  // Add a new state for new messages (this is a placeholder, you'll need to implement message fetching)
+  const [newMessages, setNewMessages] = useState<number>(0);
+
+  // Calculate total notifications
+  const totalNotifications = pendingRequests.length + newMessages;
+
+  const [notificationsViewed, setNotificationsViewed] = useState(false);
+
+  const [activeTab, setActiveTab] = useState('home');
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    if (value === 'friends') {
+      setNotificationsViewed(true);
+    }
+  };
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -122,43 +148,32 @@ export default function MainScreen() {
   const fetchFriends = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get<Friend[]>('http://localhost:3002/api/friends', {
+      const response = await axios.get<{ friends: Friend[], pendingRequests: PendingRequest[] }>('http://localhost:3002/api/friends', {
         headers: { Authorization: `Bearer ${token}` }
       });
       
       console.log('Raw friends data from server:', response.data);
       
-      if (response.data && Array.isArray(response.data)) {
-        const formattedFriends = response.data.map(friend => {
-          console.log('Processing friend:', friend);
-          const formattedFriend = {
-            ...friend,
-            id: friend.id,
-            name: friend.name,
-            profilePicture: friend.profilePicture
-              ? friend.profilePicture.startsWith('http')
-                ? friend.profilePicture
-                : `http://localhost:3002${friend.profilePicture}`
-              : null
-          };
-          console.log('Formatted friend:', formattedFriend);
-          return formattedFriend;
-        });
-        console.log('All formatted friends:', formattedFriends);
-        setFriends(prevFriends => {
-          const updatedFriends = formattedFriends.map(newFriend => {
-            const existingFriend = prevFriends.find(f => f.id === newFriend.id);
-            return existingFriend?.profilePicture ? { ...newFriend, profilePicture: existingFriend.profilePicture } : newFriend;
-          });
-          return updatedFriends;
-        });
+      if (response.data && response.data.friends && Array.isArray(response.data.friends)) {
+        setFriends(response.data.friends);
       } else {
         console.error('Unexpected response format:', response.data);
         setFriends([]);
       }
+
+      if (response.data && response.data.pendingRequests && Array.isArray(response.data.pendingRequests)) {
+        setPendingRequests(response.data.pendingRequests);
+        if (response.data.pendingRequests.length > 0) {
+          setNotificationsViewed(false);
+        }
+      } else {
+        console.error('Unexpected pending requests format:', response.data);
+        setPendingRequests([]);
+      }
     } catch (error) {
       console.error('Failed to fetch friends:', error);
       setFriends([]);
+      setPendingRequests([]);
     }
   };
 
@@ -199,33 +214,33 @@ export default function MainScreen() {
       
       console.log('Server response for adding friend:', response.data);
 
-      if (response.data.error === 'Friendship already exists') {
-        setRemoveMessage('This user is already your friend.');
-        return;
+      if (response.data.error === 'Friendship already exists or pending') {
+        setRemoveMessage('Friend request already sent or pending.');
+      } else {
+        setRemoveMessage('Friend request sent successfully.');
+        setSearchResults(prevResults => prevResults.filter(user => user.id !== friendId));
+        setSearchQuery('');
       }
-
-      const newFriend = response.data;
-      const friendFromSearch = searchResults.find(user => user.id === friendId);
-      
-      const formattedNewFriend = {
-        id: friendId,
-        name: newFriend.name || friendFromSearch?.name,
-        profilePicture: friendFromSearch?.profilePicture || newFriend.profilePicture || null
-      };
-      
-      if (formattedNewFriend.profilePicture && !formattedNewFriend.profilePicture.startsWith('http')) {
-        formattedNewFriend.profilePicture = `http://localhost:3002${formattedNewFriend.profilePicture}`;
-      }
-      
-      console.log('Formatted new friend to be added:', formattedNewFriend);
-      setFriends(prevFriends => [...prevFriends, formattedNewFriend]);
-      setSearchResults(prevResults => prevResults.filter(user => user.id !== friendId));
-      setSearchQuery('');
-      
-      console.log('Updated friends list:', [...friends, formattedNewFriend]);
     } catch (error) {
-      console.error('Failed to add friend:', error);
-      setRemoveMessage('Failed to add friend. Please try again.');
+      console.error('Failed to send friend request:', error);
+      setRemoveMessage('Failed to send friend request. Please try again.');
+    }
+  };
+
+  const acceptFriendRequest = async (friendId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post('http://localhost:3002/api/friends/accept', { friendId }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      console.log('Server response for accepting friend request:', response.data);
+
+      setRemoveMessage('Friend request accepted successfully.');
+      fetchFriends(); // Refresh the friends list and pending requests
+    } catch (error) {
+      console.error('Failed to accept friend request:', error);
+      setRemoveMessage('Failed to accept friend request. Please try again.');
     }
   };
 
@@ -369,9 +384,20 @@ export default function MainScreen() {
     }
   }, []);
 
+  useEffect(() => {
+    if (removeMessage) {
+      const timer = setTimeout(() => {
+        setRemoveMessage(null);
+      }, 5000); // Clear the message after 5 seconds
+
+      return () => clearTimeout(timer);
+    }
+  }, [removeMessage]);
+
   return (
-    <div className="min-h-screen bg-white text-black relative">
-      <header className="flex justify-between items-center p-4 bg-green-500 text-white">
+    <div className="min-h-screen bg-white text-black relative overflow-hidden">
+      {activeTab === 'home' && <div className={styles.backgroundText}></div>}
+      <header className="relative z-10 flex justify-between items-center p-4 bg-green-500 text-white">
         <h1 className="text-2xl font-bold">Sports Queue</h1>
         <Dialog>
           <DialogTrigger asChild>
@@ -394,7 +420,7 @@ export default function MainScreen() {
         </Dialog>
       </header>
 
-      <main className="p-4 pb-32">
+      <main className="relative z-10 p-4 pb-32">
         {removeMessage && (
           <div className="mb-4 p-4 border border-green-500 bg-green-50 rounded-md">
             <h4 className="font-bold">Notification</h4>
@@ -402,13 +428,20 @@ export default function MainScreen() {
           </div>
         )}
 
-        <Tabs defaultValue="home">
+        <Tabs defaultValue="home" onValueChange={handleTabChange}>
           <TabsList className="grid w-full grid-cols-5 mb-4">
             <TabsTrigger value="home">Home</TabsTrigger>
             <TabsTrigger value="profile">Profile</TabsTrigger>
             <TabsTrigger value="recent">Recent Games</TabsTrigger>
             <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
-            <TabsTrigger value="friends">Friends</TabsTrigger>
+            <TabsTrigger value="friends" className="relative">
+              Friends
+              {totalNotifications > 0 && !notificationsViewed && (
+                <span className={styles.notificationBadge}>
+                  {totalNotifications}
+                </span>
+              )}
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="home">
             <Card>
@@ -572,6 +605,32 @@ export default function MainScreen() {
                     </li>
                   ))}
                 </ul>
+
+                {pendingRequests.length > 0 && (
+                  <div className="mt-4">
+                    <h3 className="font-bold mb-2">Pending Friend Requests:</h3>
+                    <ul className="space-y-2">
+                      {pendingRequests.map((request) => (
+                        <li key={request.id} className="flex items-center space-x-2 border-b pb-2">
+                          <InteractableProfilePicture
+                            currentImage={request.profilePicture}
+                            onImageChange={undefined}
+                            onClick={() => fetchUserProfile(request.id)}
+                          />
+                          <span>{request.name}</span>
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="ml-auto"
+                            onClick={() => acceptFriendRequest(request.id)}
+                          >
+                            Accept
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

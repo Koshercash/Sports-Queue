@@ -1,0 +1,48 @@
+.backgroundText {
+  position: fixed;
+  top: 50%;  /* Moved down from 40% to 50% */
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 6vw;
+  font-weight: bold;
+  color: rgba(34, 197, 94, 0.15);  /* Light green color with increased opacity */
+  white-space: nowrap;
+  z-index: 0;
+  user-select: none;
+  pointer-events: none;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-family: Arial, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.backgroundText::before {
+  content: 'Sports';
+  display: block;
+  margin-bottom: 0.2em;
+}
+
+.backgroundText::after {
+  content: 'Queue';
+  display: block;
+  transform: translateX(10%);  /* Slightly reduced offset to the right */
+}
+
+.notificationBadge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background-color: #FFA500;
+  color: white;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 12px;
+  font-weight: bold;
+}
