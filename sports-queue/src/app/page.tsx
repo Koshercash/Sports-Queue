@@ -25,19 +25,9 @@ export default function LoginScreen() {
     skillLevel: '',
     dateOfBirth: '',
     profilePicture: null as File | null,
-    // Remove address field
   })
 
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
-
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      setIsLoggedIn(true);
-    }
-  }, []);
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value })
@@ -162,77 +152,6 @@ export default function LoginScreen() {
     }
   };
 
-  const [addingFriend, setAddingFriend] = useState<string | null>(null);
-
-  const handleAddFriend = async (friendId: string) => {
-    console.log('Adding friend:', friendId);
-    if (addingFriend === friendId) {
-      console.log('Already adding this friend, returning');
-      return;
-    }
-    setAddingFriend(friendId);
-    try {
-      const response = await axios.post('http://localhost:3002/api/friends/add', 
-        { friendId },
-        { headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` } }
-      );
-      console.log('Server response:', response.data);
-      alert(response.data.message);
-      await fetchFriends();
-    } catch (error) {
-      console.error('Error adding friend:', error);
-      if (axios.isAxiosError(error) && error.response) {
-        alert(error.response.data.error);
-      } else {
-        alert('Failed to add friend. Please try again.');
-      }
-    } finally {
-      setAddingFriend(null);
-    }
-  };
-
-  const handleRemoveFriend = async (friendId: string) => {
-    console.log('Attempting to remove friend:', friendId);
-    const isConfirmed = window.confirm("Are you sure you want to remove this friend?");
-    console.log('User confirmed:', isConfirmed);
-    if (isConfirmed) {
-      try {
-        const response = await axios.delete('http://localhost:3002/api/friends/remove', {
-          data: { friendId },
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        });
-        console.log('Server response:', response.data);
-        alert(response.data.message);
-        await fetchFriends();
-      } catch (error) {
-        console.error('Error removing friend:', error);
-        alert('Failed to remove friend. Please try again.');
-      }
-    }
-  };
-
-  const [friends, setFriends] = useState<Array<{ id: string, name: string }>>([]);
-
-  // Add this useEffect to fetch friends when the component mounts
-  useEffect(() => {
-    if (isLoggedIn) {
-      fetchFriends();
-    }
-  }, [isLoggedIn]);
-
-  const fetchFriends = async () => {
-    try {
-      const response = await axios.get('http://localhost:3002/api/friends', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      });
-      console.log('Fetched friends:', response.data);
-      setFriends(Array.isArray(response.data) ? response.data : []);
-    } catch (error) {
-      console.error('Error fetching friends:', error);
-      setFriends([]);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-white relative overflow-hidden">
       <div className="absolute inset-0 border-8 border-green-500 animate-border-rotate"></div>
@@ -245,7 +164,6 @@ export default function LoginScreen() {
             <Input name="password" type="password" placeholder="Password" value={formData.password} onChange={handleInputChange} required />
             <Input name="phone" type="tel" placeholder="Phone Number" value={formData.phone} onChange={handleInputChange} required />
             <Input name="dateOfBirth" type="date" placeholder="Date of Birth" value={formData.dateOfBirth} onChange={handleInputChange} required />
-            {/* Remove address input */}
             <Button className="w-full" onClick={handleNext}>Next</Button>
           </div>
         )}
@@ -332,29 +250,6 @@ export default function LoginScreen() {
           </div>
         )}
       </div>
-      
-      {isLoggedIn && (
-        <div className="mt-4">
-          <h2>Friends List</h2>
-          {Array.isArray(friends) && friends.length > 0 ? (
-            friends.map(friend => (
-              <div key={friend.id} className="flex items-center justify-between">
-                <span>{friend.name}</span>
-                <Button 
-                  onClick={() => handleAddFriend(friend.id)} 
-                  disabled={addingFriend === friend.id}
-                  className={`transition-all duration-300 ${addingFriend === friend.id ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  {addingFriend === friend.id ? 'Adding...' : 'Add Friend'}
-                </Button>
-                <Button onClick={() => handleRemoveFriend(friend.id)}>Remove Friend</Button>
-              </div>
-            ))
-          ) : (
-            <div>No friends available.</div>
-          )}
-        </div>
-      )}
     </div>
   )
 }

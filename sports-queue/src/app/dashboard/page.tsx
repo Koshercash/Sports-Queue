@@ -18,6 +18,7 @@ interface UserData {
   profilePicture: string | null;
   mmr5v5: number;
   mmr11v11: number;
+  bio: string; // Add this line
 }
 
 export default function DashboardPage() {

@@ -41,6 +41,7 @@ async function startServer() {
     idPicture: String,
     dateOfBirth: Date,
     profilePicturePath: String,
+    bio: { type: String, default: '' }, // Add this line
   });
 
   const User = mongoose.model('User', UserSchema);
@@ -169,11 +170,27 @@ async function startServer() {
         dateOfBirth: user.dateOfBirth,
         profilePicture: user.profilePicturePath ? `/uploads/${user.profilePicturePath}` : null,
         mmr5v5: user.mmr5v5,
-        mmr11v11: user.mmr11v11
+        mmr11v11: user.mmr11v11,
+        bio: user.bio, // Add this line
       });
     } catch (error) {
       console.error('Error fetching user profile:', error);
       res.status(500).json({ error: 'Failed to fetch user profile', details: error.message });
+    }
+  });
+
+  // Add a new endpoint to update the user's bio
+  app.put('/api/user/bio', authMiddleware, async (req, res) => {
+    try {
+      const { bio } = req.body;
+      const user = await User.findByIdAndUpdate(req.userId, { bio }, { new: true });
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      res.json({ message: 'Bio updated successfully', bio: user.bio });
+    } catch (error) {
+      console.error('Error updating bio:', error);
+      res.status(500).json({ error: 'Failed to update bio', details: error.message });
     }
   });
 
@@ -468,7 +485,8 @@ async function startServer() {
         profilePicture: user.profilePicturePath ? `/uploads/${user.profilePicturePath}` : null,
         isCurrentUser: isCurrentUser,
         mmr5v5: user.mmr5v5,
-        mmr11v11: user.mmr11v11
+        mmr11v11: user.mmr11v11,
+        bio: user.bio, // Add this line
       };
 
       console.log('Sending user data:', userData);

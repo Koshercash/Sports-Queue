@@ -17,11 +17,14 @@ import styles from './styles.module.css';
 interface UserProfile {
   id: string;
   name: string;
+  sex: string;
   position: string;
   skillLevel: string;
+  dateOfBirth: string;
+  profilePicture: string | null;
   mmr5v5: number;
   mmr11v11: number;
-  profilePicture: string | null;
+  bio: string;
 }
 
 interface Friend {
@@ -44,16 +47,14 @@ interface Match {
 interface UserProfileData {
   id: string;
   name: string;
-  email: string;
-  phone: string;
   sex: string;
   position: string;
-  skillLevel: string;
   dateOfBirth: string;
   profilePicture: string | null;
   isCurrentUser: boolean;
   mmr5v5: number;
   mmr11v11: number;
+  bio: string;
 }
 
 interface PendingRequest {
@@ -127,7 +128,14 @@ export default function MainScreen() {
         const response = await axios.get('http://localhost:3002/api/user-profile', {
           headers: { Authorization: `Bearer ${token}` }
         });
-        setUserProfile(response.data);
+        // Ensure the profilePicture URL is complete
+        const userData = {
+          ...response.data,
+          profilePicture: response.data.profilePicture
+            ? `http://localhost:3002${response.data.profilePicture}`
+            : null
+        };
+        setUserProfile(userData);
       } catch (error) {
         console.error('Failed to fetch user profile:', error);
         if (axios.isAxiosError(error) && error.response?.status === 401) {
@@ -341,7 +349,14 @@ export default function MainScreen() {
         headers: { Authorization: `Bearer ${token}` }
       });
       console.log('Fetched user profile:', response.data);
-      setSelectedProfile(response.data);
+      // Ensure the profilePicture URL is complete
+      const profileData = {
+        ...response.data,
+        profilePicture: response.data.profilePicture
+          ? `http://localhost:3002${response.data.profilePicture}`
+          : null
+      };
+      setSelectedProfile(profileData);
     } catch (error) {
       console.error('Failed to fetch user profile:', error);
       if (axios.isAxiosError(error)) {
@@ -395,6 +410,51 @@ export default function MainScreen() {
       return () => clearTimeout(timer);
     }
   }, [removeMessage]);
+
+  const handleBioChange = async (newBio: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put('http://localhost:3002/api/user/bio', { bio: newBio }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSelectedProfile(prev => prev ? { ...prev, bio: newBio } : null);
+    } catch (error) {
+      console.error('Failed to update bio:', error);
+      alert('Failed to update bio. Please try again.');
+    }
+  };
+
+  const handleAddFriendFromProfile = async () => {
+    if (selectedProfile) {
+      await addFriend(selectedProfile.id);
+    }
+  };
+
+  const handleProfilePictureChange = async (file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('profilePicture', file);
+
+      const token = localStorage.getItem('token');
+      const response = await axios.post<{ profilePicture: string }>('http://localhost:3002/api/user/profile-picture', formData, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        },
+      });
+
+      if (response.data.profilePicture) {
+        const fullProfilePictureUrl = `http://localhost:3002${response.data.profilePicture}`;
+        setUserProfile(prevProfile => prevProfile ? {
+          ...prevProfile,
+          profilePicture: fullProfilePictureUrl
+        } : null);
+      }
+    } catch (error) {
+      console.error('Error updating profile picture:', error);
+      alert('Failed to update profile picture. Please try again.');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-white text-black relative overflow-hidden">
@@ -461,27 +521,17 @@ export default function MainScreen() {
             <Card>
               <CardHeader>
                 <CardTitle>Your Profile</CardTitle>
-                <CardDescription>View your profile information</CardDescription>
+                <CardDescription>View and edit your profile information</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center space-x-4 mb-4">
-                  <Link href={`/profile/${userProfile?.id}`}>
-                    <InteractableProfilePicture
-                      currentImage={userProfile?.profilePicture ? `http://localhost:3002${userProfile.profilePicture}` : null}
-                      onImageChange={undefined}
-                      priority={true}
-                    />
-                  </Link>
-                  <div>
-                    <h3 className="text-xl font-bold">{userProfile?.name || 'User Name'}</h3>
-                    <p>Position: {userProfile?.position || 'Not set'}</p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <p><strong>Skill Level:</strong> {userProfile?.skillLevel || 'Not set'}</p>
-                  <p><strong>5v5 MMR:</strong> {userProfile?.mmr5v5 || 'Not set'}</p>
-                  <p><strong>11v11 MMR:</strong> {userProfile?.mmr11v11 || 'Not set'}</p>
-                </div>
+                {userProfile && (
+                  <UserProfile
+                    {...userProfile}
+                    isCurrentUser={true}
+                    onProfilePictureChange={handleProfilePictureChange}
+                    onBioChange={handleBioChange}
+                  />
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -692,15 +742,21 @@ export default function MainScreen() {
 
       {selectedProfile && (
         <Dialog open={!!selectedProfile} onOpenChange={() => setSelectedProfile(null)}>
-          <DialogContent>
+          <DialogContent className="sm:max-w-[425px]">
             <DialogHeader>
               <DialogTitle>{selectedProfile.name}'s Profile</DialogTitle>
             </DialogHeader>
             <UserProfile
               {...selectedProfile}
               onProfilePictureChange={undefined}
+              onBioChange={handleBioChange}
             />
-            <Button onClick={() => setSelectedProfile(null)}>Close</Button>
+            <div className="flex justify-between mt-4">
+              <Button onClick={() => setSelectedProfile(null)}>Close</Button>
+              {!selectedProfile.isCurrentUser && (
+                <Button onClick={handleAddFriendFromProfile}>Add Friend</Button>
+              )}
+            </div>
           </DialogContent>
         </Dialog>
       )}
