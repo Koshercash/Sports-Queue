@@ -23,7 +23,8 @@ interface GameScreenProps {
   mode: '5v5' | '11v11';
   players: Player[];
   onBackToMain: () => void;
-  onLeaveGame: (lobbyTime: number, gameStartTime: Date | null) => Promise<void>;
+  onLeaveGame: (gameStartTime: Date | null) => Promise<void>;
+  lobbyTime: number;
 }
 
 interface UserProfileData {
@@ -39,7 +40,7 @@ interface UserProfileData {
   bio: string;
 }
 
-export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeaveGame }: GameScreenProps) {
+export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeaveGame, lobbyTime }: GameScreenProps) {
   const [showChat, setShowChat] = useState(false)
   const [showPlayerList, setShowPlayerList] = useState(false)
   const [chatMessages, setChatMessages] = useState<{ sender: string; message: string; team: 'blue' | 'red' }[]>([])
@@ -47,20 +48,13 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
   const [selectedProfile, setSelectedProfile] = useState<UserProfileData | null>(null);
   const [showLeavePrompt, setShowLeavePrompt] = useState(false)
   const [leaveWarningMessage, setLeaveWarningMessage] = useState('')
-  const [lobbyTime, setLobbyTime] = useState(0)
   const [gameStartTime, setGameStartTime] = useState<Date | null>(null);
   const router = useRouter();
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setLobbyTime(prevTime => prevTime + 1)
-    }, 1000) // Increment every second for testing purposes
-
     // Set the game start time 20 minutes from now
     setGameStartTime(new Date(Date.now() + 20 * 60 * 1000));
-
-    return () => clearInterval(timer)
-  }, [])
+  }, []);
 
   const handleLeaveGameClick = () => {
     const now = new Date();
@@ -79,9 +73,8 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
     setShowLeavePrompt(false);
     try {
       console.log('Attempting to leave game with:', { lobbyTime, gameStartTime });
-      await onLeaveGame(lobbyTime, gameStartTime);
+      await onLeaveGame(gameStartTime);
       console.log('Game left successfully, navigating to main screen');
-      onBackToMain(); // Call this function to go back to the main screen
       router.push('/main');
     } catch (error) {
       console.error('Detailed error in handleConfirmLeave:', error);
@@ -174,6 +167,10 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
     return null;
   };
 
+  const handleBackClick = () => {
+    onBackToMain();
+  };
+
   return (
     <div className="min-h-screen bg-white text-black relative flex flex-col">
       <div className="absolute inset-0 flex">
@@ -185,7 +182,7 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
           <Button 
             variant="outline" 
             className="absolute top-4 left-4 bg-white text-green-500 hover:bg-green-50 h-10 px-3 text-sm flex items-center"
-            onClick={onBackToMain}
+            onClick={handleBackClick}
           >
             <ArrowLeft className="h-4 w-4 mr-1" />
             <span>Back</span>

@@ -107,6 +107,24 @@ export default function MainScreen() {
 
   const [gameState, setGameState] = useState<'idle' | 'loading' | 'inGame'>('idle');
 
+  const [isPenalized, setIsPenalized] = useState(false);
+  const [penaltyEndTime, setPenaltyEndTime] = useState<Date | null>(null);
+
+  // Add this new state to track if a game is in progress
+  const [isGameInProgress, setIsGameInProgress] = useState(false);
+
+  const [lobbyTime, setLobbyTime] = useState(0);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isGameInProgress) {
+      interval = setInterval(() => {
+        setLobbyTime(prevTime => prevTime + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isGameInProgress]);
+
   const handleTabChange = (value: string) => {
     setActiveTab(value);
     if (value === 'friends') {
@@ -311,7 +329,17 @@ export default function MainScreen() {
   };
 
   const toggleQueue = async () => {
+    if (isGameInProgress) {
+      // If a game is in progress, return to the game
+      setInGame(true);
+      return;
+    }
+
     if (queueStatus === 'idle') {
+      if (isPenalized) {
+        alert(`You are currently penalized and cannot join games until ${penaltyEndTime?.toLocaleString()}`);
+        return;
+      }
       try {
         const token = localStorage.getItem('token');
         const response = await axios.post('http://localhost:3002/api/queue/join', 
@@ -325,13 +353,17 @@ export default function MainScreen() {
           setTimeout(() => {
             setGameState('inGame');
             setInGame(true);
+            setIsGameInProgress(true); // Set this to true when starting a new game
           }, 3000); // Simulate loading time
         } else {
           setQueueStatus('queuing');
         }
       } catch (error) {
         if (axios.isAxiosError(error) && error.response?.status === 403) {
-          alert(error.response.data.error);
+          const penaltyEndTime = new Date(error.response.data.penaltyEndTime);
+          setIsPenalized(true);
+          setPenaltyEndTime(penaltyEndTime);
+          alert(`You are currently penalized and cannot join games until ${penaltyEndTime.toLocaleString()}`);
         } else {
           console.error('Failed to join queue:', error);
           alert('Failed to join queue. Please try again.');
@@ -350,6 +382,9 @@ export default function MainScreen() {
         console.error('Failed to leave queue:', error);
         alert('Failed to leave queue. Please try again.');
       }
+    } else if (gameState === 'inGame') {
+      // Return to the game if it's already in progress
+      setInGame(true);
     }
   };
 
@@ -482,12 +517,10 @@ export default function MainScreen() {
 
   const handleBackToMain = () => {
     setInGame(false);
-    setMatch(null);
-    setQueueStatus('idle');
-    setGameState('idle');
+    // We don't change isGameInProgress here, so the game is still considered in progress
   };
 
-  const handleLeaveGame = async (lobbyTime: number, gameStartTime: Date | null) => {
+  const handleLeaveGame = async (gameStartTime: Date | null) => {
     try {
       console.log('Sending leave game request with:', { lobbyTime, gameStartTime });
       const response = await axios.post('http://localhost:3002/api/game/leave', {
@@ -497,19 +530,35 @@ export default function MainScreen() {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
       console.log('Leave game response:', response.data);
-      if (response.data.penalized) {
-        alert(`You have been penalized for leaving too many games. You cannot join games until ${new Date(response.data.penaltyEndTime).toLocaleString()}`);
-      }
+      
       // Reset all game-related states
       setInGame(false);
       setMatch(null);
       setQueueStatus('idle');
       setGameState('idle');
+      setIsGameInProgress(false); // Only set this to false when actually leaving the game
+      setLobbyTime(0); // Reset lobby time only when actually leaving the game
+
+      if (response.data.penalized) {
+        setIsPenalized(true);
+        setPenaltyEndTime(new Date(response.data.penaltyEndTime));
+        alert(`You have been penalized for leaving too many games. You cannot join games until ${new Date(response.data.penaltyEndTime).toLocaleString()}`);
+      } else {
+        setIsPenalized(false);
+        setPenaltyEndTime(null);
+      }
     } catch (error) {
       console.error('Detailed error in handleLeaveGame:', error);
       if (axios.isAxiosError(error)) {
         console.error('Axios error details:', error.response?.data);
       }
+      // Even if there's an error, we should reset the game state
+      setInGame(false);
+      setMatch(null);
+      setQueueStatus('idle');
+      setGameState('idle');
+      setIsGameInProgress(false);
+      setLobbyTime(0); // Reset lobby time on error
       throw error;
     }
   };
@@ -527,6 +576,7 @@ export default function MainScreen() {
         }))}
         onBackToMain={handleBackToMain}
         onLeaveGame={handleLeaveGame}
+        lobbyTime={lobbyTime}
       />
     );
   }
@@ -770,16 +820,18 @@ export default function MainScreen() {
         <div className="fixed bottom-8 left-0 right-0 flex flex-col items-center space-y-4 z-30">
           <Button 
             className="w-64 h-16 text-2xl bg-green-500 hover:bg-green-600 text-white border-2 border-black"
-            onClick={gameState === 'inGame' ? handleStartMatch : toggleQueue}
-            disabled={gameState === 'loading'}
+            onClick={toggleQueue}
+            disabled={gameState === 'loading' || isPenalized || (!isGameInProgress && queueStatus === 'matched')}
           >
-            {queueStatus === 'idle' ? 'Play' : queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!'}
+            {isGameInProgress ? 'Return to Game' :
+             queueStatus === 'idle' ? 'Play' : 
+             queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!'}
           </Button>
           <Button 
             variant="outline" 
             className="text-sm"
             onClick={() => setGameMode(gameMode === '5v5' ? '11v11' : '5v5')}
-            disabled={queueStatus !== 'idle' || gameState !== 'idle'}
+            disabled={queueStatus !== 'idle' || gameState !== 'idle' || isGameInProgress}
           >
             Game Mode: {gameMode}
           </Button>
