@@ -8,6 +8,7 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const multer = require('multer');
 const upload = multer({ dest: 'uploads/' });
 const path = require('path');
+const moment = require('moment');
 
 const app = express();
 
@@ -62,6 +63,15 @@ async function startServer() {
   });
 
   const Queue = mongoose.model('Queue', QueueSchema);
+
+  const PenaltySchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    leaverTally: { type: Number, default: 0 },
+    lastPenaltyDate: { type: Date },
+    penaltyEndTime: { type: Date }
+  });
+
+  const Penalty = mongoose.model('Penalty', PenaltySchema);
 
   app.post('/api/register', upload.fields([
     { name: 'profilePicture', maxCount: 1 },
@@ -594,34 +604,34 @@ async function startServer() {
   await createDummyPlayers();
 
   // Add this endpoint to send a dummy friend request
-  const PenaltySchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    leaverTally: { type: Number, default: 0 },
-    lastPenaltyDate: { type: Date },
-    penaltyEndTime: { type: Date }
-  });
-  
-  const Penalty = mongoose.model('Penalty', PenaltySchema);
-  
-  // ... (other code)
-  
   app.post('/api/penalty/leave', authMiddleware, async (req, res) => {
     try {
-      let penalty = await Penalty.findOne({ userId: req.userId });
-      if (!penalty) {
-        penalty = new Penalty({ userId: req.userId });
+      const { gameStartTime } = req.body;
+      const now = moment();
+      const gameStart = moment(gameStartTime);
+
+      // Check if the user is leaving within 20 minutes before the game or after the game has started
+      const shouldApplyPenalty = now.isSameOrAfter(gameStart.subtract(20, 'minutes'));
+
+      if (shouldApplyPenalty) {
+        let penalty = await Penalty.findOne({ userId: req.userId });
+        if (!penalty) {
+          penalty = new Penalty({ userId: req.userId });
+        }
+
+        penalty.leaverTally += 1;
+        
+        if (penalty.leaverTally >= 3) {
+          penalty.penaltyEndTime = moment().add(24, 'hours').toDate();
+        }
+
+        penalty.lastPenaltyDate = new Date();
+        await penalty.save();
+
+        res.json({ message: 'Penalty applied', leaverTally: penalty.leaverTally });
+      } else {
+        res.json({ message: 'No penalty applied' });
       }
-  
-      penalty.leaverTally += 1;
-      
-      if (penalty.leaverTally >= 3) {
-        penalty.penaltyEndTime = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
-      }
-  
-      penalty.lastPenaltyDate = new Date();
-      await penalty.save();
-  
-      res.json({ message: 'Penalty applied', leaverTally: penalty.leaverTally });
     } catch (error) {
       console.error('Error applying penalty:', error);
       res.status(500).json({ error: 'Failed to apply penalty' });
@@ -635,17 +645,17 @@ async function startServer() {
         penalty = new Penalty({ userId: req.userId });
       }
   
-      const now = new Date();
+      const now = moment();
       if (penalty.lastPenaltyDate) {
-        const daysSinceLastPenalty = (now - penalty.lastPenaltyDate) / (1000 * 60 * 60 * 24);
-        penalty.leaverTally = Math.max(0, penalty.leaverTally - Math.floor(daysSinceLastPenalty));
+        const daysSinceLastPenalty = now.diff(moment(penalty.lastPenaltyDate), 'days');
+        penalty.leaverTally = Math.max(0, penalty.leaverTally - daysSinceLastPenalty);
       }
       
       if (penalty.leaverTally > 0) {
-        penalty.lastPenaltyDate = now;
+        penalty.lastPenaltyDate = now.toDate();
       }
   
-      const isPenalized = penalty.penaltyEndTime && now < penalty.penaltyEndTime;
+      const isPenalized = penalty.penaltyEndTime && now.isBefore(penalty.penaltyEndTime);
   
       if (!isPenalized && penalty.penaltyEndTime) {
         penalty.penaltyEndTime = null;

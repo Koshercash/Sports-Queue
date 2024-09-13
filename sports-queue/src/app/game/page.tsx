@@ -63,7 +63,7 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
   }, [])
 
   const handleLeaveGameClick = () => {
-    if (lobbyTime >= 3) {
+    if (lobbyTime >= 8) {
       setLeavePromptMessage('Leaving the game within 20 minutes before it starts can result in a penalty.')
     } else {
       setLeavePromptMessage('No penalty will be issued.')
@@ -74,12 +74,13 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
   const handleConfirmLeave = async () => {
     setShowLeavePrompt(false);
     
-    if (lobbyTime >= 3 && gameStartTime && new Date() < gameStartTime) {
+    if (gameStartTime) {
       try {
         const token = localStorage.getItem('token');
-        await axios.post('http://localhost:3002/api/penalty/leave', {}, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        await axios.post('http://localhost:3002/api/penalty/leave', 
+          { gameStartTime: gameStartTime.toISOString() },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
       } catch (error) {
         console.error('Error applying penalty:', error);
       }
