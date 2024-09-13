@@ -103,6 +103,10 @@ export default function MainScreen() {
 
   const [matchStarted, setMatchStarted] = useState(false);
 
+  const [inGame, setInGame] = useState(false);
+
+  const [gameState, setGameState] = useState<'idle' | 'loading' | 'inGame'>('idle');
+
   const handleTabChange = (value: string) => {
     setActiveTab(value);
     if (value === 'friends') {
@@ -317,6 +321,11 @@ export default function MainScreen() {
         if (response.data.match) {
           setQueueStatus('matched');
           setMatch(response.data.match);
+          setGameState('loading');
+          setTimeout(() => {
+            setGameState('inGame');
+            setInGame(true);
+          }, 3000); // Simulate loading time
         } else {
           setQueueStatus('queuing');
         }
@@ -461,10 +470,21 @@ export default function MainScreen() {
   };
 
   const handleStartMatch = () => {
-    setMatchStarted(true);
+    setInGame(true);
   };
 
-  if (matchStarted && match) {
+  const handleBackToMain = () => {
+    setInGame(false);
+  };
+
+  const handleLeaveGame = () => {
+    setInGame(false);
+    setGameState('idle');
+    setQueueStatus('idle');
+    setMatch(null);
+  };
+
+  if (inGame && match) {
     return (
       <GameScreen
         mode={gameMode}
@@ -475,6 +495,8 @@ export default function MainScreen() {
           team: match.team1.some(t => t.id === player.id) ? 'blue' : 'red',
           profilePicture: player.profilePicture || null
         }))}
+        onBackToMain={handleBackToMain}
+        onLeaveGame={handleLeaveGame}
       />
     );
   }
@@ -718,50 +740,24 @@ export default function MainScreen() {
         <div className="fixed bottom-8 left-0 right-0 flex flex-col items-center space-y-4 z-30">
           <Button 
             className="w-64 h-16 text-2xl bg-green-500 hover:bg-green-600 text-white border-2 border-black"
-            onClick={toggleQueue}
-            disabled={queueStatus === 'matched'}
+            onClick={gameState === 'inGame' ? handleStartMatch : toggleQueue}
+            disabled={gameState === 'loading'}
           >
-            {queueStatus === 'idle' ? 'Play' : queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!'}
+            {gameState === 'idle' 
+              ? (queueStatus === 'idle' ? 'Play' : queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!')
+              : gameState === 'loading' 
+                ? 'Loading Game...' 
+                : 'Go to Game'}
           </Button>
           <Button 
             variant="outline" 
             className="text-sm"
             onClick={() => setGameMode(gameMode === '5v5' ? '11v11' : '5v5')}
-            disabled={queueStatus !== 'idle'}
+            disabled={queueStatus !== 'idle' || gameState !== 'idle'}
           >
             Game Mode: {gameMode}
           </Button>
         </div>
-      )}
-
-      {match && (
-        <Dialog 
-          open={queueStatus === 'matched'} 
-          onOpenChange={(open) => {
-            if (!open) setQueueStatus('idle');
-          }}
-        >
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Match Found!</DialogTitle>
-            </DialogHeader>
-            <div>
-              <h3>Team 1</h3>
-              <ul>
-                {match.team1.map(player => (
-                  <li key={player.id}>{player.name} - {player.position}</li>
-                ))}
-              </ul>
-              <h3>Team 2</h3>
-              <ul>
-                {match.team2.map(player => (
-                  <li key={player.id}>{player.name} - {player.position}</li>
-                ))}
-              </ul>
-            </div>
-            <Button onClick={handleStartMatch}>Start Match</Button>
-          </DialogContent>
-        </Dialog>
       )}
 
       {selectedProfile && (

@@ -363,13 +363,15 @@ async function startServer() {
       });
       await newQueueEntry.save();
       
+      // Always create a match
       const match = await createMatch(gameMode, user);
       if (match) {
         res.json({ message: 'Match found', match });
       } else {
-        res.json({ message: 'Joined queue' });
+        res.status(500).json({ error: 'Failed to create match' });
       }
     } catch (error) {
+      console.error('Error joining queue:', error);
       res.status(500).json({ error: 'Failed to join queue' });
     }
   });
@@ -396,63 +398,57 @@ async function startServer() {
     const mmrField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
     const playerCount = gameMode === '5v5' ? 10 : 22;
     
-    const players = await Queue.find({ gameMode })
+    let players = await Queue.find({ gameMode })
       .populate('userId')
       .sort('timestamp')
       .limit(playerCount);
 
-    if (players.length < playerCount) return null;
+    // If not enough players in queue, add dummy players
+    if (players.length < playerCount) {
+      const dummyCount = playerCount - players.length;
+      const dummyPlayers = await User.aggregate([
+        { $match: { email: { $regex: /^dummy/ }, sex: user.sex } },
+        { $sample: { size: dummyCount } }
+      ]);
 
-    const matchedPlayers = players.filter(p => p.userId.sex === user.sex);
-    if (matchedPlayers.length < playerCount) return null;
+      players = [
+        ...players,
+        ...dummyPlayers.map(dp => ({ userId: dp }))
+      ];
+    }
 
-    matchedPlayers.sort((a, b) => Math.abs(a.userId[mmrField] - user[mmrField]) - Math.abs(b.userId[mmrField] - user[mmrField]));
+    // Ensure we have enough players
+    if (players.length < playerCount) {
+      console.log('Not enough players found, including dummies');
+      return null;
+    }
+
+    // Sort players by MMR difference from the user
+    players.sort((a, b) => 
+      Math.abs((a.userId[mmrField] || 1000) - user[mmrField]) - 
+      Math.abs((b.userId[mmrField] || 1000) - user[mmrField])
+    );
 
     const team1 = [];
     const team2 = [];
 
-    function addToTeam(player, team) {
+    // Distribute players to teams
+    for (let i = 0; i < players.length; i++) {
+      const player = players[i];
+      const team = i % 2 === 0 ? team1 : team2;
       team.push({
         id: player.userId._id,
         name: player.userId.name,
         position: player.userId.position,
-        mmr: player.userId[mmrField]
+        profilePicture: player.userId.profilePicturePath ? `/uploads/${player.userId.profilePicturePath}` : null,
+        mmr: player.userId[mmrField] || 1000
       });
     }
 
-    function isTeamValid(team, gameMode) {
-      if (gameMode === '5v5') {
-        const goalie = team.filter(p => p.position === 'goalkeeper').length;
-        const attackers = team.filter(p => ['winger', 'forward', 'midfielder'].includes(p.position)).length;
-        const defenders = team.filter(p => ['fullback', 'centerback'].includes(p.position)).length;
-        return goalie === 1 && attackers >= 2 && attackers <= 3 && defenders >= 1 && defenders <= 2;
-      } else {
-        const goalie = team.filter(p => p.position === 'goalkeeper').length;
-        const wingers = team.filter(p => p.position === 'winger').length;
-        const forwards = team.filter(p => p.position === 'forward').length;
-        const midfielders = team.filter(p => p.position === 'midfielder').length;
-        const fullbacks = team.filter(p => p.position === 'fullback').length;
-        const centerbacks = team.filter(p => p.position === 'centerback').length;
-        return goalie === 1 && wingers === 2 && forwards >= 1 && forwards <= 2 &&
-               midfielders >= 2 && midfielders <= 3 && fullbacks === 2 &&
-               centerbacks >= 1 && centerbacks <= 2 && team.length === 11;
-      }
-    }
+    // Remove matched players from the queue
+    await Queue.deleteMany({ userId: { $in: players.map(p => p.userId._id) } });
 
-    for (const player of matchedPlayers) {
-      if (team1.length < playerCount / 2 && !isTeamValid(team1, gameMode)) {
-        addToTeam(player, team1);
-      } else if (team2.length < playerCount / 2 && !isTeamValid(team2, gameMode)) {
-        addToTeam(player, team2);
-      }
-
-      if (isTeamValid(team1, gameMode) && isTeamValid(team2, gameMode)) {
-        await Queue.deleteMany({ userId: { $in: [...team1, ...team2].map(p => p.id) } });
-        return { team1, team2 };
-      }
-    }
-
-    return null;
+    return { team1, team2 };
   }
 
   // Update the /api/user/:id endpoint
@@ -558,8 +554,44 @@ async function startServer() {
     }
   }
 
+  // Add this function to create dummy players
+  async function createDummyPlayers() {
+    const positions = ['goalkeeper', 'defender', 'midfielder', 'striker'];
+    const skillLevels = ['beginner', 'average', 'intermediate', 'advanced', 'pro'];
+
+    for (let i = 0; i < 100; i++) {
+      const name = `Dummy${i + 1}`;
+      const email = `dummy${i + 1}@example.com`;
+      const sex = i % 2 === 0 ? 'male' : 'female';
+      const position = positions[i % positions.length];
+      const skillLevel = skillLevels[Math.floor(i / 20)];
+      const dateOfBirth = new Date(1990, 0, 1);
+
+      const existingUser = await User.findOne({ email });
+      if (!existingUser) {
+        const hashedPassword = await bcrypt.hash('dummypassword', 10);
+        const mmr = getMMRFromSkillLevel(skillLevel);
+        const user = new User({
+          name,
+          email,
+          password: hashedPassword,
+          phone: `123456789${i}`,
+          sex,
+          position,
+          skillLevel,
+          mmr5v5: mmr,
+          mmr11v11: mmr,
+          dateOfBirth,
+        });
+        await user.save();
+        console.log(`Created dummy player: ${name}`);
+      }
+    }
+  }
+
   // Call this function after connecting to the database
   await createSampleUsers();
+  await createDummyPlayers();
 
   // Add this endpoint to send a dummy friend request
   app.post('/api/friends/send-dummy-request', authMiddleware, async (req, res) => {
