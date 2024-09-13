@@ -1,10 +1,14 @@
 import { useState } from 'react'
+import axios from 'axios'
 import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Card, CardContent } from "@/components/ui/card"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ArrowLeft } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { UserProfile } from '@/components/UserProfile'
+import Image from 'next/image'
 
 interface Player {
   id: string;
@@ -21,11 +25,25 @@ interface GameScreenProps {
   onLeaveGame: () => void;
 }
 
+interface UserProfileData {
+  id: string;
+  name: string;
+  sex: string;
+  position: string;
+  dateOfBirth: string;
+  profilePicture: string | null;
+  isCurrentUser: boolean;
+  mmr5v5: number;
+  mmr11v11: number;
+  bio: string;
+}
+
 export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeaveGame }: GameScreenProps) {
   const [showChat, setShowChat] = useState(false)
   const [showPlayerList, setShowPlayerList] = useState(false)
   const [chatMessages, setChatMessages] = useState<{ sender: string; message: string; team: 'blue' | 'red' }[]>([])
   const [newMessage, setNewMessage] = useState('')
+  const [selectedProfile, setSelectedProfile] = useState<UserProfileData | null>(null);
 
   const getPositionStyle = (position: string, team: 'blue' | 'red', index: number) => {
     const baseStyle = "absolute transform -translate-x-1/2 -translate-y-1/2";
@@ -61,6 +79,56 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
       }]);
       setNewMessage('');
     }
+  };
+
+  const handlePlayerClick = async (player: Player) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get<UserProfileData>(`http://localhost:3002/api/user/${player.id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const profileData = {
+        ...response.data,
+        profilePicture: response.data.profilePicture
+          ? response.data.profilePicture.startsWith('http')
+            ? response.data.profilePicture
+            : `http://localhost:3002${response.data.profilePicture}`
+          : null
+      };
+      setSelectedProfile(profileData);
+    } catch (error) {
+      console.error('Failed to fetch user profile:', error);
+      alert('Failed to load user profile. Please try again.');
+    }
+  };
+
+  const handleAddFriend = async () => {
+    if (selectedProfile) {
+      try {
+        const token = localStorage.getItem('token');
+        await axios.post('http://localhost:3002/api/friends/add', 
+          { friendId: selectedProfile.id },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        alert('Friend request sent successfully');
+      } catch (error) {
+        console.error('Failed to send friend request:', error);
+        alert('Failed to send friend request. Please try again.');
+      }
+    }
+  };
+
+  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
+    e.currentTarget.src = '/default-avatar.png';
+  };
+
+  const getPlayerImage = (player: Player) => {
+    if (player.profilePicture) {
+      return player.profilePicture.startsWith('http') 
+        ? player.profilePicture 
+        : `http://localhost:3002${player.profilePicture}`;
+    }
+    return '/default-avatar.png';
   };
 
   return (
@@ -103,12 +171,19 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
           {players.map((player, index) => (
             <div
               key={player.id}
-              className={getPositionStyle(player.position, player.team, index)}
+              className={`${getPositionStyle(player.position, player.team, index)} cursor-pointer`}
+              onClick={() => handlePlayerClick(player)}
             >
-              <Avatar>
-                <AvatarImage src={player.profilePicture || `/placeholder-avatar-${index + 1}.jpg`} alt={player.name} />
-                <AvatarFallback>{player.team === 'blue' ? 'B' : 'R'}{index + 1}</AvatarFallback>
-              </Avatar>
+              <div className="w-10 h-10 rounded-full overflow-hidden">
+                <Image
+                  src={getPlayerImage(player)}
+                  alt={player.name}
+                  width={40}
+                  height={40}
+                  onError={handleImageError}
+                  className="object-cover w-full h-full"
+                />
+              </div>
             </div>
           ))}
         </div>
@@ -190,12 +265,18 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
                     <h4 className="font-semibold text-blue-600 mb-1">Blue Team</h4>
                     <ScrollArea className="h-full">
                       <ul className="space-y-2">
-                        {players.filter(p => p.team === 'blue').map((player, index) => (
-                          <li key={player.id} className="flex items-center space-x-2">
-                            <Avatar>
-                              <AvatarImage src={player.profilePicture || `/placeholder-avatar-${index * 2 + 1}.jpg`} alt={player.name} />
-                              <AvatarFallback>B{index + 1}</AvatarFallback>
-                            </Avatar>
+                        {players.filter(p => p.team === 'blue').map((player) => (
+                          <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
+                            <div className="w-10 h-10 rounded-full overflow-hidden">
+                              <Image
+                                src={getPlayerImage(player)}
+                                alt={player.name}
+                                width={40}
+                                height={40}
+                                onError={handleImageError}
+                                className="object-cover w-full h-full"
+                              />
+                            </div>
                             <span className="text-blue-600">{player.name}</span>
                             <span className="text-sm text-gray-500">({player.position})</span>
                           </li>
@@ -207,12 +288,18 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
                     <h4 className="font-semibold text-red-600 mb-1">Red Team</h4>
                     <ScrollArea className="h-full">
                       <ul className="space-y-2">
-                        {players.filter(p => p.team === 'red').map((player, index) => (
-                          <li key={player.id} className="flex items-center space-x-2">
-                            <Avatar>
-                              <AvatarImage src={player.profilePicture || `/placeholder-avatar-${index * 2 + 2}.jpg`} alt={player.name} />
-                              <AvatarFallback>R{index + 1}</AvatarFallback>
-                            </Avatar>
+                        {players.filter(p => p.team === 'red').map((player) => (
+                          <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
+                            <div className="w-10 h-10 rounded-full overflow-hidden">
+                              <Image
+                                src={getPlayerImage(player)}
+                                alt={player.name}
+                                width={40}
+                                height={40}
+                                onError={handleImageError}
+                                className="object-cover w-full h-full"
+                              />
+                            </div>
                             <span className="text-red-600">{player.name}</span>
                             <span className="text-sm text-gray-500">({player.position})</span>
                           </li>
@@ -226,6 +313,28 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
           )}
         </div>
       </div>
+
+      {selectedProfile && (
+        <Dialog open={!!selectedProfile} onOpenChange={() => setSelectedProfile(null)}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>{selectedProfile.name}'s Profile</DialogTitle>
+            </DialogHeader>
+            <UserProfile
+              {...selectedProfile}
+              onProfilePictureChange={undefined}
+              onBioChange={undefined}
+              isEditable={false}
+            />
+            <div className="flex justify-between mt-4">
+              <Button onClick={() => setSelectedProfile(null)}>Close</Button>
+              {!selectedProfile.isCurrentUser && (
+                <Button onClick={handleAddFriend}>Add Friend</Button>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   )
 }

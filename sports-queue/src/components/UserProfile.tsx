@@ -16,23 +16,24 @@ interface UserProfileProps {
   onProfilePictureChange?: (file: File) => void;
   onBioChange?: (bio: string) => void;
   onAddFriend?: () => void;
+  isEditable?: boolean;
 }
 
-export const UserProfile: React.FC<UserProfileProps> = ({
-  id,
-  name,
-  sex,
-  position,
-  dateOfBirth,
-  profilePicture,
-  isCurrentUser,
-  mmr5v5,
-  mmr11v11,
+export function UserProfile({ 
+  id, 
+  name, 
+  sex, 
+  position, 
+  dateOfBirth, 
+  profilePicture, 
+  isCurrentUser, 
+  mmr5v5, 
+  mmr11v11, 
   bio,
   onProfilePictureChange,
   onBioChange,
-  onAddFriend
-}) => {
+  isEditable = true // Default to true for backwards compatibility
+}: UserProfileProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedBio, setEditedBio] = useState(bio);
 
@@ -48,7 +49,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
   };
 
   return (
-    <div className="bg-white shadow-md rounded-lg p-6 relative">
+    <div className="space-y-4">
       <div className="flex items-center space-x-4 mb-4">
         <InteractableProfilePicture
           currentImage={profilePicture}
@@ -66,28 +67,28 @@ export const UserProfile: React.FC<UserProfileProps> = ({
         <p><strong>11v11 MMR:</strong> {mmr11v11}</p>
       </div>
       <div className="mt-4">
-        <h3 className="font-bold mb-2">Bio</h3>
-        {isEditing ? (
+        <h3 className="font-semibold">Bio:</h3>
+        {isEditable && isCurrentUser && isEditing ? (
           <>
             <textarea
               value={editedBio}
               onChange={handleBioChange}
-              className="w-full mb-2 p-2 border rounded"
-              rows={4}
+              className="w-full p-2 border rounded"
             />
-            <Button onClick={handleSaveBio}>Save Bio</Button>
+            <div className="mt-2">
+              <Button onClick={handleSaveBio} className="mr-2">Save</Button>
+              <Button onClick={() => setIsEditing(false)} variant="outline">Cancel</Button>
+            </div>
           </>
         ) : (
           <>
-            <p>{editedBio}</p>
-            {isCurrentUser && (
-              <Button onClick={() => setIsEditing(true)} className="mt-2">
-                Edit Bio
-              </Button>
+            <p>{bio}</p>
+            {isEditable && isCurrentUser && (
+              <Button onClick={() => setIsEditing(true)} className="mt-2">Edit Bio</Button>
             )}
           </>
         )}
       </div>
     </div>
   );
-};
+}
