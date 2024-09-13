@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Card, CardContent } from "@/components/ui/card"
@@ -24,19 +24,8 @@ interface GameScreenProps {
 export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeaveGame }: GameScreenProps) {
   const [showChat, setShowChat] = useState(false)
   const [showPlayerList, setShowPlayerList] = useState(false)
-  const [countdown, setCountdown] = useState(10)
-  const [gameStarted, setGameStarted] = useState(false)
   const [chatMessages, setChatMessages] = useState<{ sender: string; message: string; team: 'blue' | 'red' }[]>([])
   const [newMessage, setNewMessage] = useState('')
-
-  useEffect(() => {
-    if (countdown > 0) {
-      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
-      return () => clearTimeout(timer);
-    } else {
-      setGameStarted(true);
-    }
-  }, [countdown]);
 
   const getPositionStyle = (position: string, team: 'blue' | 'red', index: number) => {
     const baseStyle = "absolute transform -translate-x-1/2 -translate-y-1/2";
@@ -74,27 +63,16 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
     }
   };
 
-  if (!gameStarted) {
-    return (
-      <div className="min-h-screen bg-white text-black flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-4xl font-bold mb-4">Game Starting in</h1>
-          <p className="text-6xl font-bold">{countdown}</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-white text-black relative">
+    <div className="min-h-screen bg-white text-black relative flex flex-col">
       <div className="absolute inset-0 flex">
         <div className="w-1/2 bg-blue-600 opacity-80"></div>
         <div className="w-1/2 bg-red-600 opacity-80"></div>
       </div>
-      <div className="relative z-10 p-4">
+      <div className="relative z-10 p-4 flex-grow">
         <Button 
           variant="outline" 
-          className="absolute top-4 left-4 bg-green-500 hover:bg-green-600 text-white"
+          className="absolute top-4 left-4 bg-white text-green-500 hover:bg-green-50"
           onClick={onBackToMain}
         >
           <ArrowLeft className="mr-2 h-4 w-4" /> Back
@@ -151,7 +129,7 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
           <p className="font-medium">Location: Central Park Field 3</p>
         </div>
 
-        <div className="flex space-x-4">
+        <div className="flex space-x-4 mt-4">
           <Button 
             className="flex-1 bg-green-500 hover:bg-green-600 text-white" 
             onClick={() => setShowChat(!showChat)}
@@ -165,87 +143,86 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
             {showPlayerList ? 'Close Player List' : 'Open Player List'}
           </Button>
         </div>
+      </div>
 
-        <div className="flex space-x-4 mt-4">
+      {/* Chat and Player List container */}
+      <div className="relative z-20 mt-4">
+        <div className="flex space-x-4 p-4">
           {showChat && (
-            <Card>
-              <CardContent>
-                <div className="p-4">
-                  <ScrollArea className="h-48 mb-4">
-                    <div className="space-y-2">
-                      {chatMessages.map((msg, index) => (
-                        <p key={index}>
-                          <strong className={msg.team === 'blue' ? 'text-blue-600' : 'text-red-600'}>
-                            {msg.sender}:
-                          </strong> {msg.message}
-                        </p>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                  <div className="flex space-x-2">
-                    <Input 
-                      placeholder="Type a message..." 
-                      className="flex-grow" 
-                      value={newMessage}
-                      onChange={(e) => setNewMessage(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    />
-                    <Button 
-                      className="bg-green-500 hover:bg-green-600 text-white"
-                      onClick={handleSendMessage}
-                    >
-                      Send
-                    </Button>
+            <div className={`bg-white rounded-lg shadow-lg ${showPlayerList ? 'w-1/2' : 'w-full'}`}>
+              <div className="h-64 flex flex-col p-4">
+                <ScrollArea className="flex-grow mb-4">
+                  <div className="space-y-2">
+                    {chatMessages.map((msg, index) => (
+                      <p key={index}>
+                        <strong className={msg.team === 'blue' ? 'text-blue-600' : 'text-red-600'}>
+                          {msg.sender}:
+                        </strong> {msg.message}
+                      </p>
+                    ))}
                   </div>
+                </ScrollArea>
+                <div className="flex space-x-2">
+                  <Input 
+                    placeholder="Type a message..." 
+                    className="flex-grow" 
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                  />
+                  <Button 
+                    className="bg-green-500 hover:bg-green-600 text-white"
+                    onClick={handleSendMessage}
+                  >
+                    Send
+                  </Button>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           )}
 
           {showPlayerList && (
-            <Card>
-              <CardContent>
-                <div className="p-4">
-                  <h3 className="font-bold mb-2">Players</h3>
-                  <div className="flex">
-                    <div className="w-1/2 pr-2">
-                      <h4 className="font-semibold text-blue-600 mb-1">Blue Team</h4>
-                      <ScrollArea className="h-48">
-                        <ul className="space-y-2">
-                          {players.filter(p => p.team === 'blue').map((player, index) => (
-                            <li key={player.id} className="flex items-center space-x-2">
-                              <Avatar>
-                                <AvatarImage src={player.profilePicture || `/placeholder-avatar-${index * 2 + 1}.jpg`} alt={player.name} />
-                                <AvatarFallback>B{index + 1}</AvatarFallback>
-                              </Avatar>
-                              <span className="text-blue-600">{player.name}</span>
-                              <span className="text-sm text-gray-500">({player.position})</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </ScrollArea>
-                    </div>
-                    <div className="w-1/2 pl-2 border-l">
-                      <h4 className="font-semibold text-red-600 mb-1">Red Team</h4>
-                      <ScrollArea className="h-48">
-                        <ul className="space-y-2">
-                          {players.filter(p => p.team === 'red').map((player, index) => (
-                            <li key={player.id} className="flex items-center space-x-2">
-                              <Avatar>
-                                <AvatarImage src={player.profilePicture || `/placeholder-avatar-${index * 2 + 2}.jpg`} alt={player.name} />
-                                <AvatarFallback>R{index + 1}</AvatarFallback>
-                              </Avatar>
-                              <span className="text-red-600">{player.name}</span>
-                              <span className="text-sm text-gray-500">({player.position})</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </ScrollArea>
-                    </div>
+            <div className={`bg-white rounded-lg shadow-lg ${showChat ? 'w-1/2' : 'w-full'}`}>
+              <div className="h-64 p-4">
+                <h3 className="font-bold mb-2">Players</h3>
+                <div className="flex h-[calc(100%-2rem)]">
+                  <div className="w-1/2 pr-2">
+                    <h4 className="font-semibold text-blue-600 mb-1">Blue Team</h4>
+                    <ScrollArea className="h-full">
+                      <ul className="space-y-2">
+                        {players.filter(p => p.team === 'blue').map((player, index) => (
+                          <li key={player.id} className="flex items-center space-x-2">
+                            <Avatar>
+                              <AvatarImage src={player.profilePicture || `/placeholder-avatar-${index * 2 + 1}.jpg`} alt={player.name} />
+                              <AvatarFallback>B{index + 1}</AvatarFallback>
+                            </Avatar>
+                            <span className="text-blue-600">{player.name}</span>
+                            <span className="text-sm text-gray-500">({player.position})</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </ScrollArea>
+                  </div>
+                  <div className="w-1/2 pl-2 border-l">
+                    <h4 className="font-semibold text-red-600 mb-1">Red Team</h4>
+                    <ScrollArea className="h-full">
+                      <ul className="space-y-2">
+                        {players.filter(p => p.team === 'red').map((player, index) => (
+                          <li key={player.id} className="flex items-center space-x-2">
+                            <Avatar>
+                              <AvatarImage src={player.profilePicture || `/placeholder-avatar-${index * 2 + 2}.jpg`} alt={player.name} />
+                              <AvatarFallback>R{index + 1}</AvatarFallback>
+                            </Avatar>
+                            <span className="text-red-600">{player.name}</span>
+                            <span className="text-sm text-gray-500">({player.position})</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </ScrollArea>
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           )}
         </div>
       </div>
