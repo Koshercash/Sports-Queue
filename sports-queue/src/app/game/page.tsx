@@ -23,7 +23,7 @@ interface GameScreenProps {
   mode: '5v5' | '11v11';
   players: Player[];
   onBackToMain: () => void;
-  onLeaveGame: () => void;
+  onLeaveGame: (lobbyTime: number, gameStartTime: Date | null) => Promise<void>;
 }
 
 interface UserProfileData {
@@ -46,10 +46,9 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
   const [newMessage, setNewMessage] = useState('')
   const [selectedProfile, setSelectedProfile] = useState<UserProfileData | null>(null);
   const [showLeavePrompt, setShowLeavePrompt] = useState(false)
+  const [leaveWarningMessage, setLeaveWarningMessage] = useState('')
   const [lobbyTime, setLobbyTime] = useState(0)
-  const [leavePromptMessage, setLeavePromptMessage] = useState('')
   const [gameStartTime, setGameStartTime] = useState<Date | null>(null);
-  const [isPenalized, setIsPenalized] = useState(false)
   const router = useRouter();
 
   useEffect(() => {
@@ -63,60 +62,35 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
     return () => clearInterval(timer)
   }, [])
 
-  useEffect(() => {
-    checkPenaltyStatus();
-  }, []);
-
-  const checkPenaltyStatus = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:3002/api/penalty/status', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setIsPenalized(response.data.isPenalized);
-    } catch (error) {
-      console.error('Error checking penalty status:', error);
-    }
-  };
-
   const handleLeaveGameClick = () => {
     const now = new Date();
     const timeDifference = gameStartTime ? (gameStartTime.getTime() - now.getTime()) / (1000 * 60) : 0;
     
+    let warningMessage = '';
     if (lobbyTime >= 8 && timeDifference <= 20) {
-      setLeavePromptMessage('Leaving the game within 20 minutes before it starts can result in a penalty.')
-    } else {
-      setLeavePromptMessage('No penalty will be issued.')
+      warningMessage = 'Warning: Leaving the game now may result in a penalty.';
     }
-    setShowLeavePrompt(true)
-  }
+
+    setLeaveWarningMessage(warningMessage);
+    setShowLeavePrompt(true);
+  };
 
   const handleConfirmLeave = async () => {
     setShowLeavePrompt(false);
-    
-    if (gameStartTime) {
-      try {
-        const token = localStorage.getItem('token');
-        const currentTime = new Date();
-        const response = await axios.post('http://localhost:3002/api/penalty/leave', 
-          { 
-            gameStartTime: gameStartTime.toISOString(),
-            currentTime: currentTime.toISOString(),
-            lobbyTime: lobbyTime
-          },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (response.data.isPenalized) {
-          setIsPenalized(true);
-        }
-      } catch (error) {
-        console.error('Error applying penalty:', error);
+    try {
+      console.log('Attempting to leave game with:', { lobbyTime, gameStartTime });
+      await onLeaveGame(lobbyTime, gameStartTime);
+      console.log('Game left successfully, navigating to main screen');
+      onBackToMain(); // Call this function to go back to the main screen
+      router.push('/main');
+    } catch (error) {
+      console.error('Detailed error in handleConfirmLeave:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Axios error details:', error.response?.data);
       }
+      alert('Failed to leave game. Please try again.');
     }
-    
-    onLeaveGame();
-    router.push('/main'); // Redirect to main page
-  }
+  };
 
   const getPositionStyle = (position: string, team: 'blue' | 'red', index: number) => {
     const baseStyle = "absolute transform -translate-x-1/2 -translate-y-1/2";
@@ -409,9 +383,11 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Are you sure you want to leave the game?</DialogTitle>
-            <DialogDescription>
-              {leavePromptMessage}
-            </DialogDescription>
+            {leaveWarningMessage && (
+              <div className="text-yellow-500">
+                <DialogDescription>{leaveWarningMessage}</DialogDescription>
+              </div>
+            )}
           </DialogHeader>
           <div className="flex justify-end space-x-2 mt-4">
             <Button variant="outline" onClick={() => setShowLeavePrompt(false)}>Cancel</Button>

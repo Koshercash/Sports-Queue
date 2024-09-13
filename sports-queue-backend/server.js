@@ -8,7 +8,6 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 const multer = require('multer');
 const upload = multer({ dest: 'uploads/' });
 const path = require('path');
-const moment = require('moment');
 
 const app = express();
 
@@ -66,9 +65,9 @@ async function startServer() {
 
   const PenaltySchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    leaverTally: { type: Number, default: 0 },
-    lastPenaltyDate: { type: Date },
-    penaltyEndTime: { type: Date }
+    leaveCount: { type: Number, default: 0 },
+    lastLeavePenaltyDate: Date,
+    penaltyEndTime: Date
   });
 
   const Penalty = mongoose.model('Penalty', PenaltySchema);
@@ -525,7 +524,43 @@ async function startServer() {
       res.status(500).json({ error: 'Internal server error' });
     }
   });
-
+  
+  app.post('/api/game/leave', authMiddleware, async (req, res) => {
+    try {
+      console.log('Received leave game request:', req.body);
+      const { lobbyTime, gameStartTime } = req.body;
+      const now = new Date();
+      const gameStart = new Date(gameStartTime);
+      const timeDifference = (gameStart.getTime() - now.getTime()) / (1000 * 60); // difference in minutes
+  
+      if (lobbyTime >= 8 && timeDifference <= 20) {
+        let penalty = await Penalty.findOne({ userId: req.userId });
+        if (!penalty) {
+          penalty = new Penalty({ userId: req.userId });
+        }
+  
+        penalty.leaveCount += 1;
+        penalty.lastLeavePenaltyDate = now;
+  
+        if (penalty.leaveCount >= 3) {
+          penalty.penaltyEndTime = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
+        }
+  
+        await penalty.save();
+  
+        res.json({ 
+          message: 'Game left successfully', 
+          penalized: penalty.leaveCount >= 3,
+          penaltyEndTime: penalty.penaltyEndTime
+        });
+      } else {
+        res.json({ message: 'Game left successfully', penalized: false });
+      }
+    } catch (error) {
+      console.error('Detailed error in /api/game/leave:', error);
+      res.status(500).json({ error: 'Failed to process game leave', details: error.message });
+    }
+  });
   // Update the error handling middleware
   app.use((err, req, res, next) => {
     console.error(err.stack);
@@ -602,78 +637,6 @@ async function startServer() {
   // Call this function after connecting to the database
   await createSampleUsers();
   await createDummyPlayers();
-
-  // Add this endpoint to send a dummy friend request
-  app.post('/api/penalty/leave', authMiddleware, async (req, res) => {
-    try {
-      const { gameStartTime } = req.body;
-      const now = moment();
-      const gameStart = moment(gameStartTime);
-
-      // Check if the user is leaving within 20 minutes before the game or after the game has started
-      const shouldApplyPenalty = now.isSameOrAfter(gameStart.subtract(20, 'minutes'));
-
-      if (shouldApplyPenalty) {
-        let penalty = await Penalty.findOne({ userId: req.userId });
-        if (!penalty) {
-          penalty = new Penalty({ userId: req.userId });
-        }
-
-        penalty.leaverTally += 1;
-        
-        if (penalty.leaverTally >= 3) {
-          penalty.penaltyEndTime = moment().add(24, 'hours').toDate();
-        }
-
-        penalty.lastPenaltyDate = new Date();
-        await penalty.save();
-
-        res.json({ message: 'Penalty applied', leaverTally: penalty.leaverTally });
-      } else {
-        res.json({ message: 'No penalty applied' });
-      }
-    } catch (error) {
-      console.error('Error applying penalty:', error);
-      res.status(500).json({ error: 'Failed to apply penalty' });
-    }
-  });
-  
-  app.get('/api/penalty/status', authMiddleware, async (req, res) => {
-    try {
-      let penalty = await Penalty.findOne({ userId: req.userId });
-      if (!penalty) {
-        penalty = new Penalty({ userId: req.userId });
-      }
-  
-      const now = moment();
-      if (penalty.lastPenaltyDate) {
-        const daysSinceLastPenalty = now.diff(moment(penalty.lastPenaltyDate), 'days');
-        penalty.leaverTally = Math.max(0, penalty.leaverTally - daysSinceLastPenalty);
-      }
-      
-      if (penalty.leaverTally > 0) {
-        penalty.lastPenaltyDate = now.toDate();
-      }
-  
-      const isPenalized = penalty.penaltyEndTime && now.isBefore(penalty.penaltyEndTime);
-  
-      if (!isPenalized && penalty.penaltyEndTime) {
-        penalty.penaltyEndTime = null;
-      }
-  
-      await penalty.save();
-  
-      res.json({
-        isPenalized,
-        penaltyEndTime: penalty.penaltyEndTime,
-        leaverTally: penalty.leaverTally
-      });
-    } catch (error) {
-      console.error('Error checking penalty status:', error);
-      res.status(500).json({ error: 'Failed to check penalty status' });
-    }
-  });
-  
 
   const PORT = process.env.PORT || 3002;
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

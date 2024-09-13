@@ -107,9 +107,6 @@ export default function MainScreen() {
 
   const [gameState, setGameState] = useState<'idle' | 'loading' | 'inGame'>('idle');
 
-  const [isPenalized, setIsPenalized] = useState(false);
-  const [penaltyEndTime, setPenaltyEndTime] = useState<Date | null>(null);
-
   const handleTabChange = (value: string) => {
     setActiveTab(value);
     if (value === 'friends') {
@@ -158,7 +155,6 @@ export default function MainScreen() {
 
     fetchUserProfile();
     fetchFriends();
-    checkPenaltyStatus();
 
     const intervalId = setInterval(() => {
       fetchUserProfile();
@@ -315,11 +311,6 @@ export default function MainScreen() {
   };
 
   const toggleQueue = async () => {
-    if (isPenalized) {
-      alert(`You are currently penalized. You can join a game again at ${penaltyEndTime?.toLocaleString()}`);
-      return;
-    }
-
     if (queueStatus === 'idle') {
       try {
         const token = localStorage.getItem('token');
@@ -341,7 +332,6 @@ export default function MainScreen() {
       } catch (error) {
         if (axios.isAxiosError(error) && error.response?.status === 403) {
           alert(error.response.data.error);
-          checkPenaltyStatus(); // Refresh penalty status
         } else {
           console.error('Failed to join queue:', error);
           alert('Failed to join queue. Please try again.');
@@ -492,25 +482,35 @@ export default function MainScreen() {
 
   const handleBackToMain = () => {
     setInGame(false);
-  };
-
-  const handleLeaveGame = () => {
-    setInGame(false);
-    setGameState('idle');
-    setQueueStatus('idle');
     setMatch(null);
+    setQueueStatus('idle');
+    setGameState('idle');
   };
 
-  const checkPenaltyStatus = async () => {
+  const handleLeaveGame = async (lobbyTime: number, gameStartTime: Date | null) => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get('http://localhost:3002/api/penalty/status', {
-        headers: { Authorization: `Bearer ${token}` }
+      console.log('Sending leave game request with:', { lobbyTime, gameStartTime });
+      const response = await axios.post('http://localhost:3002/api/game/leave', {
+        lobbyTime,
+        gameStartTime: gameStartTime?.toISOString()
+      }, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       });
-      setIsPenalized(response.data.isPenalized);
-      setPenaltyEndTime(response.data.penaltyEndTime ? new Date(response.data.penaltyEndTime) : null);
+      console.log('Leave game response:', response.data);
+      if (response.data.penalized) {
+        alert(`You have been penalized for leaving too many games. You cannot join games until ${new Date(response.data.penaltyEndTime).toLocaleString()}`);
+      }
+      // Reset all game-related states
+      setInGame(false);
+      setMatch(null);
+      setQueueStatus('idle');
+      setGameState('idle');
     } catch (error) {
-      console.error('Error checking penalty status:', error);
+      console.error('Detailed error in handleLeaveGame:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Axios error details:', error.response?.data);
+      }
+      throw error;
     }
   };
 
@@ -773,11 +773,7 @@ export default function MainScreen() {
             onClick={gameState === 'inGame' ? handleStartMatch : toggleQueue}
             disabled={gameState === 'loading'}
           >
-            {isPenalized ? 'Penalized' : (gameState === 'idle' 
-              ? (queueStatus === 'idle' ? 'Play' : queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!')
-              : gameState === 'loading' 
-                ? 'Loading Game...' 
-                : 'Go to Game')}
+            {queueStatus === 'idle' ? 'Play' : queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!'}
           </Button>
           <Button 
             variant="outline" 
