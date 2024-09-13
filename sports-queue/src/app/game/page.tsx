@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -16,7 +16,7 @@ interface Player {
   name: string;
   position: string;
   team: 'blue' | 'red';
-  profilePicture: string | null;
+  profilePicture?: string | null;
 }
 
 interface GameScreenProps {
@@ -49,12 +49,13 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
   const [lobbyTime, setLobbyTime] = useState(0)
   const [leavePromptMessage, setLeavePromptMessage] = useState('')
   const [gameStartTime, setGameStartTime] = useState<Date | null>(null);
+  const [isPenalized, setIsPenalized] = useState(false)
   const router = useRouter();
 
   useEffect(() => {
     const timer = setInterval(() => {
       setLobbyTime(prevTime => prevTime + 1)
-    }, 60000) // Increment every minute
+    }, 1000) // Increment every second for testing purposes
 
     // Set the game start time 20 minutes from now
     setGameStartTime(new Date(Date.now() + 20 * 60 * 1000));
@@ -62,8 +63,27 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
     return () => clearInterval(timer)
   }, [])
 
+  useEffect(() => {
+    checkPenaltyStatus();
+  }, []);
+
+  const checkPenaltyStatus = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get('http://localhost:3002/api/penalty/status', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setIsPenalized(response.data.isPenalized);
+    } catch (error) {
+      console.error('Error checking penalty status:', error);
+    }
+  };
+
   const handleLeaveGameClick = () => {
-    if (lobbyTime >= 8) {
+    const now = new Date();
+    const timeDifference = gameStartTime ? (gameStartTime.getTime() - now.getTime()) / (1000 * 60) : 0;
+    
+    if (lobbyTime >= 8 && timeDifference <= 20) {
       setLeavePromptMessage('Leaving the game within 20 minutes before it starts can result in a penalty.')
     } else {
       setLeavePromptMessage('No penalty will be issued.')
@@ -77,10 +97,18 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
     if (gameStartTime) {
       try {
         const token = localStorage.getItem('token');
-        await axios.post('http://localhost:3002/api/penalty/leave', 
-          { gameStartTime: gameStartTime.toISOString() },
+        const currentTime = new Date();
+        const response = await axios.post('http://localhost:3002/api/penalty/leave', 
+          { 
+            gameStartTime: gameStartTime.toISOString(),
+            currentTime: currentTime.toISOString(),
+            lobbyTime: lobbyTime
+          },
           { headers: { Authorization: `Bearer ${token}` } }
         );
+        if (response.data.isPenalized) {
+          setIsPenalized(true);
+        }
       } catch (error) {
         console.error('Error applying penalty:', error);
       }
@@ -163,17 +191,13 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
     }
   };
 
-  const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
-    e.currentTarget.src = '/default-avatar.png';
-  };
-
   const getPlayerImage = (player: Player) => {
     if (player.profilePicture) {
       return player.profilePicture.startsWith('http') 
         ? player.profilePicture 
         : `http://localhost:3002${player.profilePicture}`;
     }
-    return '/default-avatar.png';
+    return null;
   };
 
   return (
@@ -222,16 +246,13 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
               className={`${getPositionStyle(player.position, player.team, index)} cursor-pointer`}
               onClick={() => handlePlayerClick(player)}
             >
-              <div className="w-10 h-10 rounded-full overflow-hidden">
-                <Image
-                  src={getPlayerImage(player)}
-                  alt={player.name}
-                  width={40}
-                  height={40}
-                  onError={handleImageError}
-                  className="object-cover w-full h-full"
-                />
-              </div>
+              <Avatar>
+                {player.profilePicture ? (
+                  <AvatarImage src={getPlayerImage(player) || ''} alt={player.name} />
+                ) : (
+                  <AvatarFallback>{player.name.charAt(0)}</AvatarFallback>
+                )}
+              </Avatar>
             </div>
           ))}
         </div>
@@ -248,8 +269,9 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
         </div>
 
         <div className="flex justify-between items-center mb-4 bg-white bg-opacity-80 p-2 rounded">
-          <p className="font-medium">Time: 7:00 PM</p>
-          <p className="font-medium">Location: Central Park Field 3</p>
+          <p className="font-medium">Current Time: {new Date().toLocaleTimeString()}</p>
+          <p className="font-medium">Game Start Time: {gameStartTime?.toLocaleTimeString()}</p>
+          <p className="font-medium">Lobby Time: {lobbyTime} seconds</p>
         </div>
 
         <div className="flex space-x-4 mt-4">
@@ -317,11 +339,10 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
                           <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden">
                               <Image
-                                src={getPlayerImage(player)}
+                                src={getPlayerImage(player) || ''}
                                 alt={player.name}
                                 width={40}
                                 height={40}
-                                onError={handleImageError}
                                 className="object-cover w-full h-full"
                               />
                             </div>
@@ -340,11 +361,10 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
                           <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden">
                               <Image
-                                src={getPlayerImage(player)}
+                                src={getPlayerImage(player) || ''}
                                 alt={player.name}
                                 width={40}
                                 height={40}
-                                onError={handleImageError}
                                 className="object-cover w-full h-full"
                               />
                             </div>

@@ -339,8 +339,13 @@ export default function MainScreen() {
           setQueueStatus('queuing');
         }
       } catch (error) {
-        console.error('Failed to join queue:', error);
-        alert('Failed to join queue. Please try again.');
+        if (axios.isAxiosError(error) && error.response?.status === 403) {
+          alert(error.response.data.error);
+          checkPenaltyStatus(); // Refresh penalty status
+        } else {
+          console.error('Failed to join queue:', error);
+          alert('Failed to join queue. Please try again.');
+        }
       }
     } else if (queueStatus === 'queuing') {
       try {
@@ -768,11 +773,11 @@ export default function MainScreen() {
             onClick={gameState === 'inGame' ? handleStartMatch : toggleQueue}
             disabled={gameState === 'loading'}
           >
-            {gameState === 'idle' 
+            {isPenalized ? 'Penalized' : (gameState === 'idle' 
               ? (queueStatus === 'idle' ? 'Play' : queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!')
               : gameState === 'loading' 
                 ? 'Loading Game...' 
-                : 'Go to Game'}
+                : 'Go to Game')}
           </Button>
           <Button 
             variant="outline" 
