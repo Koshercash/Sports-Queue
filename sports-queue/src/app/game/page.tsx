@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import axios from 'axios'
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -6,9 +6,10 @@ import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ArrowLeft } from 'lucide-react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { UserProfile } from '@/components/UserProfile'
 import Image from 'next/image'
+import { useRouter } from 'next/navigation';
 
 interface Player {
   id: string;
@@ -44,6 +45,49 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
   const [chatMessages, setChatMessages] = useState<{ sender: string; message: string; team: 'blue' | 'red' }[]>([])
   const [newMessage, setNewMessage] = useState('')
   const [selectedProfile, setSelectedProfile] = useState<UserProfileData | null>(null);
+  const [showLeavePrompt, setShowLeavePrompt] = useState(false)
+  const [lobbyTime, setLobbyTime] = useState(0)
+  const [leavePromptMessage, setLeavePromptMessage] = useState('')
+  const [gameStartTime, setGameStartTime] = useState<Date | null>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setLobbyTime(prevTime => prevTime + 1)
+    }, 60000) // Increment every minute
+
+    // Set the game start time 20 minutes from now
+    setGameStartTime(new Date(Date.now() + 20 * 60 * 1000));
+
+    return () => clearInterval(timer)
+  }, [])
+
+  const handleLeaveGameClick = () => {
+    if (lobbyTime >= 3) {
+      setLeavePromptMessage('Leaving the game within 20 minutes before it starts can result in a penalty.')
+    } else {
+      setLeavePromptMessage('No penalty will be issued.')
+    }
+    setShowLeavePrompt(true)
+  }
+
+  const handleConfirmLeave = async () => {
+    setShowLeavePrompt(false);
+    
+    if (lobbyTime >= 3 && gameStartTime && new Date() < gameStartTime) {
+      try {
+        const token = localStorage.getItem('token');
+        await axios.post('http://localhost:3002/api/penalty/leave', {}, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      } catch (error) {
+        console.error('Error applying penalty:', error);
+      }
+    }
+    
+    onLeaveGame();
+    router.push('/main'); // Redirect to main page
+  }
 
   const getPositionStyle = (position: string, team: 'blue' | 'red', index: number) => {
     const baseStyle = "absolute transform -translate-x-1/2 -translate-y-1/2";
@@ -138,20 +182,23 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
         <div className="w-1/2 bg-red-600 opacity-80"></div>
       </div>
       <div className="relative z-10 p-4 flex-grow">
-        <Button 
-          variant="outline" 
-          className="absolute top-4 left-4 bg-white text-green-500 hover:bg-green-50"
-          onClick={onBackToMain}
-        >
-          <ArrowLeft className="mr-2 h-4 w-4" /> Back
-        </Button>
-        <Button 
-          variant="outline" 
-          className="absolute top-4 right-4 bg-white"
-          onClick={onLeaveGame}
-        >
-          Leave Game
-        </Button>
+        <div className="flex items-center">
+          <Button 
+            variant="outline" 
+            className="absolute top-4 left-4 bg-white text-green-500 hover:bg-green-50 h-10 px-3 text-sm flex items-center"
+            onClick={onBackToMain}
+          >
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            <span>Back</span>
+          </Button>
+          <Button 
+            variant="outline" 
+            className="absolute top-4 right-4 bg-white h-10 px-4"
+            onClick={handleLeaveGameClick}
+          >
+            Leave Game
+          </Button>
+        </div>
         <h1 className="text-4xl font-bold text-center mb-8 text-white">{mode}</h1>
         
         <div className="w-full h-[60vh] bg-green-800 relative mb-8 rounded-xl overflow-hidden border-4 border-white">
@@ -335,6 +382,22 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Leave Game Prompt */}
+      <Dialog open={showLeavePrompt} onOpenChange={setShowLeavePrompt}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Are you sure you want to leave the game?</DialogTitle>
+            <DialogDescription>
+              {leavePromptMessage}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end space-x-2 mt-4">
+            <Button variant="outline" onClick={() => setShowLeavePrompt(false)}>Cancel</Button>
+            <Button onClick={handleConfirmLeave}>Leave Game</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

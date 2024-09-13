@@ -594,46 +594,76 @@ async function startServer() {
   await createDummyPlayers();
 
   // Add this endpoint to send a dummy friend request
-  app.post('/api/friends/send-dummy-request', authMiddleware, async (req, res) => {
+  const PenaltySchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    leaverTally: { type: Number, default: 0 },
+    lastPenaltyDate: { type: Date },
+    penaltyEndTime: { type: Date }
+  });
+  
+  const Penalty = mongoose.model('Penalty', PenaltySchema);
+  
+  // ... (other code)
+  
+  app.post('/api/penalty/leave', authMiddleware, async (req, res) => {
     try {
-      const currentUser = await User.findById(req.userId);
-      const dummyFriend = await User.findOne({ name: 'Alice' });
-
-      if (!dummyFriend) {
-        return res.status(404).json({ error: 'Dummy friend not found' });
+      let penalty = await Penalty.findOne({ userId: req.userId });
+      if (!penalty) {
+        penalty = new Penalty({ userId: req.userId });
       }
-
-      const existingFriendship = await Friend.findOne({
-        $or: [
-          { user: currentUser._id, friend: dummyFriend._id },
-          { user: dummyFriend._id, friend: currentUser._id }
-        ]
-      });
-
-      if (existingFriendship) {
-        return res.status(400).json({ error: 'Friendship already exists' });
+  
+      penalty.leaverTally += 1;
+      
+      if (penalty.leaverTally >= 3) {
+        penalty.penaltyEndTime = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
       }
-
-      const newFriend = new Friend({
-        user: currentUser._id,
-        friend: dummyFriend._id,
-        status: 'accepted'
-      });
-      await newFriend.save();
-
-      const reverseFriend = new Friend({
-        user: dummyFriend._id,
-        friend: currentUser._id,
-        status: 'accepted'
-      });
-      await reverseFriend.save();
-
-      res.status(201).json({ message: 'Dummy friend request sent and accepted' });
+  
+      penalty.lastPenaltyDate = new Date();
+      await penalty.save();
+  
+      res.json({ message: 'Penalty applied', leaverTally: penalty.leaverTally });
     } catch (error) {
-      console.error('Error sending dummy friend request:', error);
-      res.status(500).json({ error: 'Failed to send dummy friend request' });
+      console.error('Error applying penalty:', error);
+      res.status(500).json({ error: 'Failed to apply penalty' });
     }
   });
+  
+  app.get('/api/penalty/status', authMiddleware, async (req, res) => {
+    try {
+      let penalty = await Penalty.findOne({ userId: req.userId });
+      if (!penalty) {
+        penalty = new Penalty({ userId: req.userId });
+      }
+  
+      const now = new Date();
+      if (penalty.lastPenaltyDate) {
+        const daysSinceLastPenalty = (now - penalty.lastPenaltyDate) / (1000 * 60 * 60 * 24);
+        penalty.leaverTally = Math.max(0, penalty.leaverTally - Math.floor(daysSinceLastPenalty));
+      }
+      
+      if (penalty.leaverTally > 0) {
+        penalty.lastPenaltyDate = now;
+      }
+  
+      const isPenalized = penalty.penaltyEndTime && now < penalty.penaltyEndTime;
+  
+      if (!isPenalized && penalty.penaltyEndTime) {
+        penalty.penaltyEndTime = null;
+      }
+  
+      await penalty.save();
+  
+      res.json({
+        isPenalized,
+        penaltyEndTime: penalty.penaltyEndTime,
+        leaverTally: penalty.leaverTally
+      });
+    } catch (error) {
+      console.error('Error checking penalty status:', error);
+      res.status(500).json({ error: 'Failed to check penalty status' });
+    }
+  });
+  
 
   const PORT = process.env.PORT || 3002;
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

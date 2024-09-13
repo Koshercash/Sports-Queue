@@ -107,6 +107,9 @@ export default function MainScreen() {
 
   const [gameState, setGameState] = useState<'idle' | 'loading' | 'inGame'>('idle');
 
+  const [isPenalized, setIsPenalized] = useState(false);
+  const [penaltyEndTime, setPenaltyEndTime] = useState<Date | null>(null);
+
   const handleTabChange = (value: string) => {
     setActiveTab(value);
     if (value === 'friends') {
@@ -155,6 +158,7 @@ export default function MainScreen() {
 
     fetchUserProfile();
     fetchFriends();
+    checkPenaltyStatus();
 
     const intervalId = setInterval(() => {
       fetchUserProfile();
@@ -311,6 +315,11 @@ export default function MainScreen() {
   };
 
   const toggleQueue = async () => {
+    if (isPenalized) {
+      alert(`You are currently penalized. You can join a game again at ${penaltyEndTime?.toLocaleString()}`);
+      return;
+    }
+
     if (queueStatus === 'idle') {
       try {
         const token = localStorage.getItem('token');
@@ -485,6 +494,19 @@ export default function MainScreen() {
     setGameState('idle');
     setQueueStatus('idle');
     setMatch(null);
+  };
+
+  const checkPenaltyStatus = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get('http://localhost:3002/api/penalty/status', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setIsPenalized(response.data.isPenalized);
+      setPenaltyEndTime(response.data.penaltyEndTime ? new Date(response.data.penaltyEndTime) : null);
+    } catch (error) {
+      console.error('Error checking penalty status:', error);
+    }
   };
 
   if (inGame && match) {
