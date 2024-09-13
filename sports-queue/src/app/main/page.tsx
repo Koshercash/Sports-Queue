@@ -431,6 +431,9 @@ export default function MainScreen() {
         headers: { Authorization: `Bearer ${token}` }
       });
       setSelectedProfile(prev => prev ? { ...prev, bio: newBio } : null);
+      
+      // Update the userProfile state as well
+      setUserProfile(prev => prev ? { ...prev, bio: newBio } : null);
     } catch (error) {
       console.error('Failed to update bio:', error);
       alert('Failed to update bio. Please try again.');
