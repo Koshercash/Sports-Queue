@@ -9,7 +9,7 @@ import { ArrowLeft } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { UserProfile } from '@/components/UserProfile'
 import Image from 'next/image'
-import { useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation'
 
 interface Player {
   id: string;
@@ -210,9 +210,9 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   // Function to get the field location (this is a placeholder, replace with actual logic)
   const getFieldLocation = () => {
     return {
-      name: "Central Park Field",
+      name: "Central Park Field 1",
       gpsLink: "https://goo.gl/maps/exampleLink",
-      image: "/images/central-park-field.jpg" // Add an actual image path
+      image: "/Soccer-Field-Placeholder.jpg",  // Use the default image from the field-images folder
     };
   };
 
@@ -258,27 +258,43 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
           <div className="absolute top-1/3 right-0 w-1 h-1/3 bg-white"></div>
           
           {userPlayer && (
-            <div className={`absolute ${userPlayer.team === 'blue' ? 'left-1/2' : 'right-1/2'} top-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center`}>
-              <p className="text-2xl font-bold text-white mb-2">Position:</p>
-              <div className={`w-16 h-16 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative mb-2`}>
-                <Avatar>
+            <div className={`absolute ${userPlayer.team === 'blue' ? 'left-1/4' : 'right-1/4'} top-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center`}>
+              <p className="text-3xl font-bold text-white mb-2">Position:</p>
+              <div className={`w-40 h-40 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative mb-2`}>
+                <div className="w-full h-full relative">
                   {userPlayer.profilePicture ? (
-                    <AvatarImage src={getPlayerImage(userPlayer) || ''} alt={userPlayer.name} />
+                    <Image
+                      src={getPlayerImage(userPlayer) || ''}
+                      alt={userPlayer.name}
+                      layout="fill"
+                      objectFit="cover"
+                      className="rounded-full"
+                    />
                   ) : (
-                    <AvatarFallback>{userPlayer.name.charAt(0)}</AvatarFallback>
+                    <div className="w-full h-full flex items-center justify-center bg-gray-200 text-4xl font-bold">
+                      {userPlayer.name.charAt(0)}
+                    </div>
                   )}
-                </Avatar>
+                </div>
               </div>
-              <p className="text-2xl font-bold text-white">{userPlayer.position}</p>
+              <p className="text-3xl font-bold text-white">{userPlayer.position}</p>
             </div>
           )}
 
           {/* Field location information */}
-          <div className={`absolute ${userPlayer?.team === 'blue' ? 'right-1/4' : 'left-1/4'} top-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center`}>
-            <p className="text-2xl font-bold text-white mb-2">Field Location:</p>
-            <p className="text-xl text-white mb-2">{fieldLocation.name}</p>
-            <a href={fieldLocation.gpsLink} target="_blank" rel="noopener noreferrer" className="text-blue-300 underline mb-2">GPS Link</a>
-            <img src={fieldLocation.image} alt="Field Location" className="w-32 h-32 object-cover rounded-lg" />
+          <div className={`absolute ${userPlayer?.team === 'blue' ? 'left-3/4' : 'left-1/4'} top-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center`}>
+            <p className="text-3xl font-bold text-white mb-2">Field Location:</p>
+            <p className="text-2xl text-white mb-2">{fieldLocation.name}</p>
+            <div className="w-48 h-48 relative mb-2">
+              <Image
+                src={fieldLocation.image}
+                alt="Field Location"
+                layout="fill"
+                objectFit="cover"
+                className="rounded-lg"
+              />
+            </div>
+            <a href={fieldLocation.gpsLink} target="_blank" rel="noopener noreferrer" className="text-blue-300 underline text-xl mt-2">GPS Link</a>
           </div>
         </div>
 

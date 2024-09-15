@@ -1,13 +1,19 @@
-require('dotenv').config();
-const express = require('express');
-const mongoose = require('mongoose');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const cors = require('cors');
-const { MongoMemoryServer } = require('mongodb-memory-server');
-const multer = require('multer');
+import dotenv from 'dotenv';
+import express from 'express';
+import mongoose from 'mongoose';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
+import cors from 'cors';
+import { MongoMemoryServer } from 'mongodb-memory-server';
+import multer from 'multer';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const upload = multer({ dest: 'uploads/' });
-const path = require('path');
 
 const app = express();
 
@@ -17,7 +23,6 @@ app.use(cors({
   credentials: true
 }));
 
-// Add this line after your other app.use() statements
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 async function startServer() {
