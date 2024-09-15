@@ -1,15 +1,16 @@
-import { useState, useEffect } from 'react'
+'use client';
+
+import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Check } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { UserProfile } from '@/components/UserProfile'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { Check } from 'lucide-react'
-
+import { useGameState } from '@/components/GameStateProvider'
 
 interface Player {
   id: string;
@@ -42,16 +43,7 @@ interface UserProfileData {
 }
 
 export default function GameScreen({ mode = '5v5', players, currentUserId, onBackToMain, onLeaveGame, lobbyTime }: GameScreenProps) {
-  const [gameState, setGameState] = useState('lobby');
-  const [totalGameTime, setTotalGameTime] = useState(0);
-  const [gameTime, setGameTime] = useState(0);
-  const [reportScoreTime, setReportScoreTime] = useState(0);
-  const [blueScore, setBlueScore] = useState(0);
-  const [redScore, setRedScore] = useState(0);
-  const [halfTimeOccurred, setHalfTimeOccurred] = useState(false);
-  const [isReady, setIsReady] = useState(false);
-  const [readyCount, setReadyCount] = useState(0);
-
+  const { gameState, setGameState } = useGameState();
   const [showChat, setShowChat] = useState(false)
   const [showPlayerList, setShowPlayerList] = useState(false)
   const [chatMessages, setChatMessages] = useState<{ sender: string; message: string; team: 'blue' | 'red' }[]>([])
@@ -59,38 +51,19 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   const [selectedProfile, setSelectedProfile] = useState<UserProfileData | null>(null);
   const [showLeavePrompt, setShowLeavePrompt] = useState(false)
   const [leaveWarningMessage, setLeaveWarningMessage] = useState('')
-  const [gameStartTime, setGameStartTime] = useState<Date | null>(null);
   const router = useRouter();
 
   useEffect(() => {
     // Set the game start time 20 minutes from now
-    setGameStartTime(new Date(Date.now() + 20 * 60 * 1000));
-  }, []);
-
-  useEffect(() => {
-    let timer: NodeJS.Timeout;
-
-    if (gameState === 'inProgress') {
-      timer = setInterval(() => {
-        setTotalGameTime((prevTime) => {
-          if (prevTime <= 0) {
-            clearInterval(timer);
-            setGameState('ended');
-            return 0;
-          }
-          return prevTime - 1;
-        });
-      }, 1000);
-    }
-
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [gameState]);
+    setGameState(prevState => ({
+      ...prevState,
+      gameStartTime: new Date(Date.now() + 20 * 60 * 1000)
+    }));
+  }, [setGameState]);
 
   const handleLeaveGameClick = () => {
     const now = new Date();
-    const timeDifference = gameStartTime ? (gameStartTime.getTime() - now.getTime()) / (1000 * 60) : 0;
+    const timeDifference = gameState.gameStartTime ? (gameState.gameStartTime.getTime() - now.getTime()) / (1000 * 60) : 0;
     
     let warningMessage = '';
     if (lobbyTime >= 8 && timeDifference <= 20) {
@@ -104,8 +77,8 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   const handleConfirmLeave = async () => {
     setShowLeavePrompt(false);
     try {
-      console.log('Attempting to leave game with:', { lobbyTime, gameStartTime });
-      await onLeaveGame(gameStartTime);
+      console.log('Attempting to leave game with:', { lobbyTime, gameStartTime: gameState.gameStartTime });
+      await onLeaveGame(gameState.gameStartTime);
       console.log('Game left successfully, navigating to main screen');
       router.push('/main');
     } catch (error) {
@@ -168,7 +141,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
   const handleSendMessage = () => {
     if (newMessage.trim()) {
-      const currentPlayer = players.find(p => p.id === 'current_player_id'); // Replace with actual current player ID
+      const currentPlayer = players.find(p => p.id === currentUserId);
       setChatMessages([...chatMessages, { 
         sender: currentPlayer?.name || 'You', 
         message: newMessage.trim(), 
@@ -250,16 +223,25 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   const fieldLocation = getFieldLocation();
 
   const handleReadyUp = () => {
-    if (gameState === 'lobby') {
-      const newReadyState = !isReady;
-      setIsReady(newReadyState);
-      setReadyCount(prevCount => newReadyState ? prevCount + 1 : prevCount - 1);
-      
-      if (newReadyState) {
-        setGameState('inProgress');
-        setTotalGameTime(120); // Reset total game time to 120 seconds
-        setHalfTimeOccurred(false);
-      }
+    if (gameState.gameState === 'lobby') {
+      const newReadyState = !gameState.isReady;
+      setGameState(prevState => ({
+        ...prevState,
+        isReady: newReadyState,
+        readyCount: newReadyState ? prevState.readyCount + 1 : prevState.readyCount - 1,
+        gameState: newReadyState ? 'inProgress' : 'lobby',
+        totalGameTime: newReadyState ? 120 : 0, // Reset total game time to 120 seconds (2 minutes for testing)
+        halfTimeOccurred: false,
+      }));
+    }
+  };
+
+  const handleReportScore = () => {
+    if (gameState.gameState === 'reportScore') {
+      setGameState(prevState => ({
+        ...prevState,
+        gameState: 'ended',
+      }));
     }
   };
 
@@ -351,46 +333,52 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
           </div>
 
           {/* Game state display */}
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center">
-            {gameState === 'inProgress' && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            {gameState.gameState === 'inProgress' && (
               <div className="text-8xl font-bold text-white">
-                {formatTime(totalGameTime)}
+                {formatTime(gameState.totalGameTime)}
               </div>
             )}
-            {gameState === 'halftime' && (
-              <div className="text-5xl font-bold text-white absolute top-8 left-1/2 transform -translate-x-1/2">
-                <div>HALFTIME</div>
-                <div className="mt-2 text-6xl">{formatTime(gameTime)}</div>
+            {gameState.gameState === 'halftime' && (
+              <div className="flex flex-col items-center">
+                <div className="text-5xl font-bold text-white mb-4 absolute top-8">HALFTIME</div>
+                <div className="text-8xl font-bold text-white">{formatTime(gameState.totalGameTime)}</div>
               </div>
             )}
-            {gameState === 'reportScore' && (
+            {gameState.gameState === 'reportScore' && (
               <div className="text-5xl font-bold text-white">
                 <div>Report Score</div>
-                <div className="mt-2 text-8xl">{formatTime(reportScoreTime)}</div>
+                <div className="mt-2 text-8xl">{formatTime(gameState.reportScoreTime)}</div>
                 <div className="flex justify-center items-center space-x-8 mt-4">
                   <Input 
                     type="number" 
-                    value={blueScore} 
-                    onChange={(e) => setBlueScore(Number(e.target.value))}
+                    value={gameState.blueScore} 
+                    onChange={(e) => setGameState(prevState => ({ ...prevState, blueScore: Number(e.target.value) }))}
                     className="w-24 h-24 text-4xl text-center text-blue-500 bg-white"
                   />
                   <span className="text-white">-</span>
                   <Input 
                     type="number" 
-                    value={redScore} 
-                    onChange={(e) => setRedScore(Number(e.target.value))}
+                    value={gameState.redScore} 
+                    onChange={(e) => setGameState(prevState => ({ ...prevState, redScore: Number(e.target.value) }))}
                     className="w-24 h-24 text-4xl text-center text-red-500 bg-white"
                   />
                 </div>
+                <Button 
+                  onClick={handleReportScore}
+                  className="mt-4 bg-green-500 hover:bg-green-600 text-white"
+                >
+                  Submit Score
+                </Button>
               </div>
             )}
-            {gameState === 'ended' && (
+            {gameState.gameState === 'ended' && (
               <div className="text-5xl font-bold text-green-300 flex flex-col items-center">
                 <div className="mb-4">Game Result:</div>
                 <div className="flex justify-center items-center space-x-8">
-                  <span className="text-blue-500 text-9xl">{blueScore}</span>
+                  <span className="text-blue-500 text-9xl">{gameState.blueScore}</span>
                   <span className="text-white text-7xl">-</span>
-                  <span className="text-red-500 text-9xl">{redScore}</span>
+                  <span className="text-red-500 text-9xl">{gameState.redScore}</span>
                 </div>
               </div>
             )}
@@ -398,7 +386,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         </div>
 
         <div className="flex items-center justify-center mb-8">
-          {gameState === 'lobby' ? (
+          {gameState.gameState === 'lobby' ? (
             <>
               <Button 
                 className="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white text-3xl font-bold px-12 py-6 rounded-xl shadow-lg transform transition-all duration-200 ease-in-out hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-green-300"
@@ -406,7 +394,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
               >
                 READY UP
               </Button>
-              {isReady && <Check className="text-green-500 w-16 h-16 ml-4" />}
+              {gameState.isReady && <Check className="text-green-500 w-16 h-16 ml-4" />}
             </>
           ) : (
             <Button 
@@ -425,7 +413,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
         <div className="flex justify-between items-center mb-4 bg-white bg-opacity-80 p-2 rounded">
           <p className="font-medium">Current Time: {new Date().toLocaleTimeString()}</p>
-          <p className="font-medium">Game Start Time: {gameStartTime?.toLocaleTimeString()}</p>
+          <p className="font-medium">Game Start Time: {gameState.gameStartTime?.toLocaleTimeString()}</p>
           <p className="font-medium">Lobby Time: {lobbyTime} seconds</p>
         </div>
 
@@ -453,7 +441,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
               <div className="h-64 flex flex-col p-4">
                 <ScrollArea className="flex-grow mb-4">
                   <div className="space-y-2">
-                    {chatMessages.map((msg, index) => (
+                    {chatMessages.map((msg: { sender: string; message: string; team: 'blue' | 'red' }, index: number) => (
                       <p key={index}>
                         <strong className={msg.team === 'blue' ? 'text-blue-600' : 'text-red-600'}>
                           {msg.sender}:
