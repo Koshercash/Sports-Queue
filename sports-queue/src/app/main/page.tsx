@@ -115,6 +115,31 @@ export default function MainScreen() {
 
   const [lobbyTime, setLobbyTime] = useState(0);
 
+  // Add this function to check penalty status
+  const checkPenaltyStatus = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const response = await axios.get('http://localhost:3002/api/penalty/status', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.data.isPenalized) {
+        setIsPenalized(true);
+        setPenaltyEndTime(new Date(response.data.penaltyEndTime));
+        setQueueStatus('idle');
+        setGameState('idle');
+        setIsGameInProgress(false);
+      } else {
+        setIsPenalized(false);
+        setPenaltyEndTime(null);
+      }
+    } catch (error) {
+      console.error('Error checking penalty status:', error);
+    }
+  };
+
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isGameInProgress) {
@@ -149,37 +174,54 @@ export default function MainScreen() {
       return;
     }
 
-    const fetchUserProfile = async () => {
-      try {
-        const response = await axios.get('http://localhost:3002/api/user-profile', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        // Ensure the profilePicture URL is complete
-        const userData = {
-          ...response.data,
-          profilePicture: response.data.profilePicture
-            ? `http://localhost:3002${response.data.profilePicture}`
-            : null
-        };
-        setUserProfile(userData);
-      } catch (error) {
-        console.error('Failed to fetch user profile:', error);
-        if (axios.isAxiosError(error) && error.response?.status === 401) {
-          localStorage.removeItem('token');
-          router.push('/');
-        }
-      }
+    const initializeApp = async () => {
+      await checkPenaltyStatus(); // Check penalty status immediately
+      await fetchUserProfile();
+      await fetchFriends();
     };
 
-    fetchUserProfile();
-    fetchFriends();
+    initializeApp();
 
     const intervalId = setInterval(() => {
+      checkPenaltyStatus();
       fetchUserProfile();
-    }, 60000); // Refresh profile every minute
+    }, 60000); // Refresh penalty status and profile every minute
 
     return () => clearInterval(intervalId);
   }, [router]);
+
+  const fetchUserProfile = async (userId?: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const url = userId 
+        ? `http://localhost:3002/api/user/${userId}`
+        : 'http://localhost:3002/api/user-profile';
+      
+      const response = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      // Ensure the profilePicture URL is complete
+      const userData = {
+        ...response.data,
+        profilePicture: response.data.profilePicture
+          ? `http://localhost:3002${response.data.profilePicture}`
+          : null
+      };
+      
+      if (userId) {
+        setSelectedProfile(userData);
+      } else {
+        setUserProfile(userData);
+      }
+    } catch (error) {
+      console.error('Failed to fetch user profile:', error);
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        localStorage.removeItem('token');
+        router.push('/');
+      }
+    }
+  };
 
   const fetchFriends = async () => {
     try {
@@ -212,11 +254,6 @@ export default function MainScreen() {
       setPendingRequests([]);
     }
   };
-
-  // Add this useEffect to call fetchFriends on component mount
-  useEffect(() => {
-    fetchFriends();
-  }, []);
 
   const searchUsers = async () => {
     try {
@@ -330,16 +367,19 @@ export default function MainScreen() {
 
   const toggleQueue = async () => {
     if (isGameInProgress) {
-      // If a game is in progress, return to the game
       setInGame(true);
       return;
     }
 
+    // Check penalty status before joining queue
+    await checkPenaltyStatus();
+
+    if (isPenalized) {
+      alert(`You are currently penalized and cannot join games until ${penaltyEndTime?.toLocaleString()}`);
+      return;
+    }
+
     if (queueStatus === 'idle') {
-      if (isPenalized) {
-        alert(`You are currently penalized and cannot join games until ${penaltyEndTime?.toLocaleString()}`);
-        return;
-      }
       try {
         const token = localStorage.getItem('token');
         const response = await axios.post('http://localhost:3002/api/queue/join', 
@@ -353,8 +393,8 @@ export default function MainScreen() {
           setTimeout(() => {
             setGameState('inGame');
             setInGame(true);
-            setIsGameInProgress(true); // Set this to true when starting a new game
-          }, 3000); // Simulate loading time
+            setIsGameInProgress(true);
+          }, 3000);
         } else {
           setQueueStatus('queuing');
         }
@@ -385,40 +425,6 @@ export default function MainScreen() {
     } else if (gameState === 'inGame') {
       // Return to the game if it's already in progress
       setInGame(true);
-    }
-  };
-
-  const fetchUserProfile = async (userId: string) => {
-    console.log('Fetching profile for user:', userId);
-    if (!userId) {
-      console.error('Invalid userId:', userId);
-      return;
-    }
-    try {
-      const token = localStorage.getItem('token');
-      console.log('Using token:', token);
-      const response = await axios.get<UserProfileData>(`http://localhost:3002/api/user/${userId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      console.log('Fetched user profile:', response.data);
-      // Ensure the profilePicture URL is complete
-      const profileData = {
-        ...response.data,
-        profilePicture: response.data.profilePicture
-          ? `http://localhost:3002${response.data.profilePicture}`
-          : null
-      };
-      setSelectedProfile(profileData);
-    } catch (error) {
-      console.error('Failed to fetch user profile:', error);
-      if (axios.isAxiosError(error)) {
-        console.error('Error response:', error.response?.data);
-        console.error('Error status:', error.response?.status);
-        setRemoveMessage(`Failed to load user data: ${error.response?.data?.error || error.message}`);
-      } else {
-        console.error('Unexpected error:', error);
-        setRemoveMessage('An unexpected error occurred while fetching user data');
-      }
     }
   };
 
@@ -574,6 +580,7 @@ export default function MainScreen() {
           team: match.team1.some(t => t.id === player.id) ? 'blue' : 'red',
           profilePicture: player.profilePicture || null
         }))}
+        currentUserId={userProfile?.id || ''}
         onBackToMain={handleBackToMain}
         onLeaveGame={handleLeaveGame}
         lobbyTime={lobbyTime}
@@ -831,7 +838,7 @@ export default function MainScreen() {
             variant="outline" 
             className="text-sm"
             onClick={() => setGameMode(gameMode === '5v5' ? '11v11' : '5v5')}
-            disabled={queueStatus !== 'idle' || gameState !== 'idle' || isGameInProgress}
+            disabled={queueStatus !== 'idle' || gameState !== 'idle' || isGameInProgress || isPenalized}
           >
             Game Mode: {gameMode}
           </Button>

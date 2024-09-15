@@ -22,6 +22,7 @@ interface Player {
 interface GameScreenProps {
   mode: '5v5' | '11v11';
   players: Player[];
+  currentUserId: string;
   onBackToMain: () => void;
   onLeaveGame: (gameStartTime: Date | null) => Promise<void>;
   lobbyTime: number;
@@ -40,7 +41,7 @@ interface UserProfileData {
   bio: string;
 }
 
-export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeaveGame, lobbyTime }: GameScreenProps) {
+export default function GameScreen({ mode = '5v5', players, currentUserId, onBackToMain, onLeaveGame, lobbyTime }: GameScreenProps) {
   const [showChat, setShowChat] = useState(false)
   const [showPlayerList, setShowPlayerList] = useState(false)
   const [chatMessages, setChatMessages] = useState<{ sender: string; message: string; team: 'blue' | 'red' }[]>([])
@@ -85,27 +86,52 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
     }
   };
 
-  const getPositionStyle = (position: string, team: 'blue' | 'red', index: number) => {
+  const getPositionStyle = (position: string, team: 'blue' | 'red', index: number, totalPlayers: number) => {
     const baseStyle = "absolute transform -translate-x-1/2 -translate-y-1/2";
-    const teamColor = team === 'blue' ? 'border-blue-300' : 'border-red-300';
+    const teamColor = team === 'blue' ? 'border-blue-500' : 'border-red-500';
+    const isBlueTeam = team === 'blue';
     
     if (mode === '5v5') {
       switch (position) {
-        case 'goalkeeper': return `${baseStyle} ${team === 'blue' ? 'left-[10%]' : 'right-[10%]'} top-1/2 ${teamColor}`;
-        case 'defender': return `${baseStyle} ${team === 'blue' ? 'left-[30%]' : 'right-[30%]'} ${index % 2 === 0 ? 'top-[30%]' : 'top-[70%]'} ${teamColor}`;
-        case 'midfielder': return `${baseStyle} ${team === 'blue' ? 'left-[50%]' : 'right-[50%]'} top-1/2 ${teamColor}`;
-        case 'striker': return `${baseStyle} ${team === 'blue' ? 'left-[70%]' : 'right-[70%]'} top-1/2 ${teamColor}`;
-        default: return `${baseStyle} ${team === 'blue' ? 'left-1/4' : 'right-1/4'} top-1/2 ${teamColor}`;
+        case 'goalkeeper': return `${baseStyle} ${isBlueTeam ? 'left-[5%]' : 'left-[95%]'} top-1/2 ${teamColor}`;
+        case 'defender': return `${baseStyle} ${isBlueTeam ? 'left-[20%]' : 'left-[80%]'} ${index % 2 === 0 ? 'top-[30%]' : 'top-[70%]'} ${teamColor}`;
+        case 'midfielder': return `${baseStyle} ${isBlueTeam ? 'left-[35%]' : 'left-[65%]'} top-1/2 ${teamColor}`;
+        case 'striker': return `${baseStyle} ${isBlueTeam ? 'left-[45%]' : 'left-[55%]'} top-1/2 ${teamColor}`;
+        default: return `${baseStyle} ${isBlueTeam ? 'left-[30%]' : 'left-[70%]'} top-1/2 ${teamColor}`;
       }
     } else {
       // 11v11 positioning
-      switch (position) {
-        case 'goalkeeper': return `${baseStyle} ${team === 'blue' ? 'left-[5%]' : 'right-[5%]'} top-1/2 ${teamColor}`;
-        case 'defender': return `${baseStyle} ${team === 'blue' ? 'left-[20%]' : 'right-[20%]'} top-[${20 + (index * 15)}%] ${teamColor}`;
-        case 'midfielder': return `${baseStyle} ${team === 'blue' ? 'left-[40%]' : 'right-[40%]'} top-[${25 + (index * 12.5)}%] ${teamColor}`;
-        case 'striker': return `${baseStyle} ${team === 'blue' ? 'left-[60%]' : 'right-[60%]'} top-[${30 + (index * 20)}%] ${teamColor}`;
-        default: return `${baseStyle} ${team === 'blue' ? 'left-1/4' : 'right-1/4'} top-1/2 ${teamColor}`;
+      const positions = {
+        goalkeeper: [{ x: 5, y: 50 }],
+        defender: [
+          { x: 15, y: 20 },
+          { x: 15, y: 40 },
+          { x: 15, y: 60 },
+          { x: 15, y: 80 },
+        ],
+        midfielder: [
+          { x: 30, y: 25 },
+          { x: 30, y: 50 },
+          { x: 30, y: 75 },
+        ],
+        striker: [
+          { x: 40, y: 33 },
+          { x: 40, y: 66 },
+        ],
+      };
+
+      let pos = positions[position as keyof typeof positions] || [{ x: 25, y: 50 }];
+      let { x, y } = pos[index % pos.length];
+
+      if (!isBlueTeam) {
+        x = 100 - x;
       }
+
+      // Ensure players stay within field boundaries
+      x = Math.max(2, Math.min(98, x));
+      y = Math.max(5, Math.min(95, y));
+
+      return `${baseStyle} left-[${x}%] top-[${y}%] ${teamColor}`;
     }
   };
 
@@ -171,6 +197,27 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
     onBackToMain();
   };
 
+  const positionOrder = ['goalkeeper', 'defender', 'midfielder', 'striker'];
+  const sortedPlayers = players.sort((a, b) => 
+    positionOrder.indexOf(a.position) - positionOrder.indexOf(b.position)
+  );
+
+  const blueTeam = sortedPlayers.filter(p => p.team === 'blue');
+  const redTeam = sortedPlayers.filter(p => p.team === 'red');
+
+  const userPlayer = players.find(p => p.id === currentUserId);
+
+  // Function to get the field location (this is a placeholder, replace with actual logic)
+  const getFieldLocation = () => {
+    return {
+      name: "Central Park Field",
+      gpsLink: "https://goo.gl/maps/exampleLink",
+      image: "/images/central-park-field.jpg" // Add an actual image path
+    };
+  };
+
+  const fieldLocation = getFieldLocation();
+
   return (
     <div className="min-h-screen bg-white text-black relative flex flex-col">
       <div className="absolute inset-0 flex">
@@ -210,22 +257,29 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
           <div className="absolute top-1/3 left-0 w-1 h-1/3 bg-white"></div>
           <div className="absolute top-1/3 right-0 w-1 h-1/3 bg-white"></div>
           
-          {/* Player positions */}
-          {players.map((player, index) => (
-            <div
-              key={player.id}
-              className={`${getPositionStyle(player.position, player.team, index)} cursor-pointer`}
-              onClick={() => handlePlayerClick(player)}
-            >
-              <Avatar>
-                {player.profilePicture ? (
-                  <AvatarImage src={getPlayerImage(player) || ''} alt={player.name} />
-                ) : (
-                  <AvatarFallback>{player.name.charAt(0)}</AvatarFallback>
-                )}
-              </Avatar>
+          {userPlayer && (
+            <div className={`absolute ${userPlayer.team === 'blue' ? 'left-1/2' : 'right-1/2'} top-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center`}>
+              <p className="text-2xl font-bold text-white mb-2">Position:</p>
+              <div className={`w-16 h-16 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative mb-2`}>
+                <Avatar>
+                  {userPlayer.profilePicture ? (
+                    <AvatarImage src={getPlayerImage(userPlayer) || ''} alt={userPlayer.name} />
+                  ) : (
+                    <AvatarFallback>{userPlayer.name.charAt(0)}</AvatarFallback>
+                  )}
+                </Avatar>
+              </div>
+              <p className="text-2xl font-bold text-white">{userPlayer.position}</p>
             </div>
-          ))}
+          )}
+
+          {/* Field location information */}
+          <div className={`absolute ${userPlayer?.team === 'blue' ? 'right-1/4' : 'left-1/4'} top-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center`}>
+            <p className="text-2xl font-bold text-white mb-2">Field Location:</p>
+            <p className="text-xl text-white mb-2">{fieldLocation.name}</p>
+            <a href={fieldLocation.gpsLink} target="_blank" rel="noopener noreferrer" className="text-blue-300 underline mb-2">GPS Link</a>
+            <img src={fieldLocation.image} alt="Field Location" className="w-32 h-32 object-cover rounded-lg" />
+          </div>
         </div>
 
         <div className="flex justify-center mb-8">
@@ -306,7 +360,7 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
                     <h4 className="font-semibold text-blue-600 mb-1">Blue Team</h4>
                     <ScrollArea className="h-full">
                       <ul className="space-y-2">
-                        {players.filter(p => p.team === 'blue').map((player) => (
+                        {blueTeam.map((player) => (
                           <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden">
                               <Image
@@ -328,7 +382,7 @@ export default function GameScreen({ mode = '5v5', players, onBackToMain, onLeav
                     <h4 className="font-semibold text-red-600 mb-1">Red Team</h4>
                     <ScrollArea className="h-full">
                       <ul className="space-y-2">
-                        {players.filter(p => p.team === 'red').map((player) => (
+                        {redTeam.map((player) => (
                           <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden">
                               <Image
