@@ -242,7 +242,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
             Leave Game
           </Button>
         </div>
-        <h1 className="text-4xl font-bold text-center mb-8 text-white">{mode}</h1>
+        <h1 className="text-5xl font-bold text-center mb-8 text-white">{mode}</h1>
         
         <div className="w-full h-[60vh] bg-green-800 relative mb-8 rounded-xl overflow-hidden border-4 border-white">
           {/* Simplified soccer field graphic */}
@@ -258,9 +258,9 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
           <div className="absolute top-1/3 right-0 w-1 h-1/3 bg-white"></div>
           
           {userPlayer && (
-            <div className={`absolute ${userPlayer.team === 'blue' ? 'left-1/4' : 'right-1/4'} top-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center`}>
-              <p className="text-3xl font-bold text-white mb-2">Position:</p>
-              <div className={`w-40 h-40 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative mb-2`}>
+            <div className={`absolute ${userPlayer.team === 'blue' ? 'left-1/4' : 'right-1/4'} inset-y-0 transform ${userPlayer.team === 'blue' ? '-translate-x-1/2' : 'translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
+              <p className="text-4xl font-bold text-white mb-2">Position:</p>
+              <div className={`w-40 h-40 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative`}>
                 <div className="w-full h-full relative">
                   {userPlayer.profilePicture ? (
                     <Image
@@ -271,21 +271,23 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
                       className="rounded-full"
                     />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gray-200 text-4xl font-bold">
+                    <div className="w-full h-full flex items-center justify-center bg-gray-200 text-5xl font-bold">
                       {userPlayer.name.charAt(0)}
                     </div>
                   )}
                 </div>
               </div>
-              <p className="text-3xl font-bold text-white">{userPlayer.position}</p>
+              <p className="text-4xl font-bold text-white">{userPlayer.position}</p>
             </div>
           )}
 
           {/* Field location information */}
-          <div className={`absolute ${userPlayer?.team === 'blue' ? 'left-3/4' : 'left-1/4'} top-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center`}>
-            <p className="text-3xl font-bold text-white mb-2">Field Location:</p>
-            <p className="text-2xl text-white mb-2">{fieldLocation.name}</p>
-            <div className="w-48 h-48 relative mb-2">
+          <div className={`absolute ${userPlayer?.team === 'blue' ? 'right-1/4' : 'left-1/4'} inset-y-0 transform ${userPlayer?.team === 'blue' ? 'translate-x-1/2' : '-translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
+            <div className="text-center">
+              <p className="text-4xl font-bold text-white mb-2">Field Location:</p>
+              <p className="text-3xl text-white">{fieldLocation.name}</p>
+            </div>
+            <div className="w-48 h-48 relative">
               <Image
                 src={fieldLocation.image}
                 alt="Field Location"
@@ -294,12 +296,12 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
                 className="rounded-lg"
               />
             </div>
-            <a href={fieldLocation.gpsLink} target="_blank" rel="noopener noreferrer" className="text-blue-300 underline text-xl mt-2">GPS Link</a>
+            <a href={fieldLocation.gpsLink} target="_blank" rel="noopener noreferrer" className="text-2xl text-blue-300 underline">GPS Link</a>
           </div>
         </div>
 
         <div className="flex justify-center mb-8">
-          <Button className="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white text-2xl font-bold px-12 py-6 rounded-xl shadow-lg transform transition-all duration-200 ease-in-out hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-green-300">
+          <Button className="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white text-3xl font-bold px-12 py-6 rounded-xl shadow-lg transform transition-all duration-200 ease-in-out hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-green-300">
             READY UP
           </Button>
         </div>
