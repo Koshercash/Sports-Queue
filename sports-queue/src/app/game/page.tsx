@@ -69,7 +69,20 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
   const handleLeaveGameClick = () => {
     if (gameState.gameState === 'ended') {
-      // If the game has ended, allow leaving without warning or penalty
+      // If the game has ended, clear the game state and return to main
+      localStorage.removeItem('gameState');
+      setGameState({
+        gameState: 'lobby',
+        totalGameTime: 0,
+        gameTime: 0,
+        reportScoreTime: 0,
+        blueScore: 0,
+        redScore: 0,
+        halfTimeOccurred: false,
+        isReady: false,
+        readyCount: 0,
+        gameStartTime: null,
+      });
       router.push('/main');
       return;
     }
@@ -88,17 +101,27 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
   const handleConfirmLeave = async () => {
     setShowLeavePrompt(false);
-    if (gameState.gameState === 'ended') {
-      // Allow leaving without penalty after the game has ended
+    try {
+      await onLeaveGame(gameState.gameStartTime);
+      // Clear the game state from local storage
+      localStorage.removeItem('gameState');
+      // Reset the game state
+      setGameState({
+        gameState: 'lobby',
+        totalGameTime: 0,
+        gameTime: 0,
+        reportScoreTime: 0,
+        blueScore: 0,
+        redScore: 0,
+        halfTimeOccurred: false,
+        isReady: false,
+        readyCount: 0,
+        gameStartTime: null,
+      });
       router.push('/main');
-    } else {
-      try {
-        await onLeaveGame(gameState.gameStartTime);
-        router.push('/main');
-      } catch (error) {
-        console.error('Error leaving game:', error);
-        alert('Failed to leave game. Please try again.');
-      }
+    } catch (error) {
+      console.error('Error leaving game:', error);
+      alert('Failed to leave game. Please try again.');
     }
   };
 
@@ -366,14 +389,22 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
                     <Input 
                       type="number" 
                       value={gameState.blueScore} 
-                      onChange={(e) => setGameState(prevState => ({ ...prevState, blueScore: Number(e.target.value) }))}
+                      onChange={(e) => {
+                        const value = Math.max(0, parseInt(e.target.value) || 0);
+                        setGameState(prevState => ({ ...prevState, blueScore: value }));
+                      }}
+                      min="0"
                       className="w-24 h-24 text-4xl text-center text-blue-500 bg-white"
                     />
                     <span className="text-white">-</span>
                     <Input 
                       type="number" 
                       value={gameState.redScore} 
-                      onChange={(e) => setGameState(prevState => ({ ...prevState, redScore: Number(e.target.value) }))}
+                      onChange={(e) => {
+                        const value = Math.max(0, parseInt(e.target.value) || 0);
+                        setGameState(prevState => ({ ...prevState, redScore: value }));
+                      }}
+                      min="0"
                       className="w-24 h-24 text-4xl text-center text-red-500 bg-white"
                     />
                   </div>

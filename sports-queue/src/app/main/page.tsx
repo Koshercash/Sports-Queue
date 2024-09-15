@@ -366,9 +366,14 @@ export default function MainScreen() {
   };
 
   const toggleQueue = async () => {
-    if (isGameInProgress) {
-      setInGame(true);
-      return;
+    // Check if there's an existing game state in localStorage
+    const savedGameState = localStorage.getItem('gameState');
+    if (savedGameState) {
+      const parsedGameState = JSON.parse(savedGameState);
+      if (parsedGameState.gameState !== 'lobby' && parsedGameState.gameState !== 'ended') {
+        setInGame(true);
+        return;
+      }
     }
 
     // Check penalty status before joining queue
