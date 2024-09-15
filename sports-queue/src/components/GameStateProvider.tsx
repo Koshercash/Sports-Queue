@@ -54,7 +54,7 @@ export const GameStateProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const newTotalGameTime = prevState.totalGameTime - 1;
 
           if (prevState.gameState === 'inProgress' && newTotalGameTime === halfTime && !prevState.halfTimeOccurred) {
-            // Trigger halftime when we reach the halfway point
+            // Trigger halftime when we reach the halfway point and it hasn't occurred yet
             return {
               ...prevState,
               gameState: 'halftime',

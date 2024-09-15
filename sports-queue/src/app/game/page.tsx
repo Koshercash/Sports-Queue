@@ -229,7 +229,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         ...prevState,
         isReady: newReadyState,
         readyCount: newReadyState ? prevState.readyCount + 1 : prevState.readyCount - 1,
-        gameState: newReadyState ? 'inProgress' : 'lobby',
+        gameState: newReadyState ? 'inProgress' : 'lobby', // Start the game immediately when ready
         totalGameTime: newReadyState ? 120 : 0, // Reset total game time to 120 seconds (2 minutes for testing)
         halfTimeOccurred: false,
       }));
@@ -346,7 +346,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
               </div>
             )}
             {gameState.gameState === 'reportScore' && (
-              <div className="text-5xl font-bold text-white">
+              <div className="text-5xl font-bold text-white bg-black bg-opacity-50 p-8 rounded-xl flex flex-col items-center">
                 <div>Report Score</div>
                 <div className="mt-2 text-8xl">{formatTime(gameState.reportScoreTime)}</div>
                 <div className="flex justify-center items-center space-x-8 mt-4">
@@ -373,7 +373,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
               </div>
             )}
             {gameState.gameState === 'ended' && (
-              <div className="text-5xl font-bold text-green-300 flex flex-col items-center">
+              <div className="text-5xl font-bold text-green-300 flex flex-col items-center bg-black bg-opacity-50 p-8 rounded-xl">
                 <div className="mb-4">Game Result:</div>
                 <div className="flex justify-center items-center space-x-8">
                   <span className="text-blue-500 text-9xl">{gameState.blueScore}</span>
@@ -387,15 +387,19 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
         <div className="flex items-center justify-center mb-8">
           {gameState.gameState === 'lobby' ? (
-            <>
+            <div className="flex items-center space-x-4">
               <Button 
-                className="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white text-3xl font-bold px-12 py-6 rounded-xl shadow-lg transform transition-all duration-200 ease-in-out hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-green-300"
+                className={`text-white text-3xl font-bold px-12 py-6 rounded-xl shadow-lg transform transition-all duration-200 ease-in-out hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-green-300 ${
+                  gameState.isReady ? 'bg-red-500 hover:bg-red-600 active:bg-red-700' : 'bg-green-500 hover:bg-green-600 active:bg-green-700'
+                }`}
                 onClick={handleReadyUp}
               >
-                READY UP
+                {gameState.isReady ? 'CANCEL' : 'READY UP'}
               </Button>
-              {gameState.isReady && <Check className="text-green-500 w-16 h-16 ml-4" />}
-            </>
+              {gameState.isReady && (
+                <Check className="text-green-500 w-16 h-16" />
+              )}
+            </div>
           ) : (
             <Button 
               className="bg-gray-400 text-white text-3xl font-bold px-12 py-6 rounded-xl cursor-not-allowed"
