@@ -54,19 +54,31 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   const router = useRouter();
 
   useEffect(() => {
-    // Set the game start time 20 minutes from now
-    setGameState(prevState => ({
-      ...prevState,
-      gameStartTime: new Date(Date.now() + 20 * 60 * 1000)
-    }));
-  }, [setGameState]);
+    // Load game state from localStorage on component mount
+    const savedGameState = localStorage.getItem('gameState');
+    if (savedGameState) {
+      const parsedGameState = JSON.parse(savedGameState);
+      setGameState(parsedGameState);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Save game state to localStorage whenever it changes
+    localStorage.setItem('gameState', JSON.stringify(gameState));
+  }, [gameState]);
 
   const handleLeaveGameClick = () => {
+    if (gameState.gameState === 'ended') {
+      // If the game has ended, allow leaving without warning or penalty
+      router.push('/main');
+      return;
+    }
+
     const now = new Date();
     const timeDifference = gameState.gameStartTime ? (gameState.gameStartTime.getTime() - now.getTime()) / (1000 * 60) : 0;
     
     let warningMessage = '';
-    if (lobbyTime >= 8 && timeDifference <= 20) {
+    if (lobbyTime >= 8 && timeDifference <= 20 && gameState.gameState !== 'ended') {
       warningMessage = 'Warning: Leaving the game now may result in a penalty.';
     }
 
@@ -76,17 +88,17 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
   const handleConfirmLeave = async () => {
     setShowLeavePrompt(false);
-    try {
-      console.log('Attempting to leave game with:', { lobbyTime, gameStartTime: gameState.gameStartTime });
-      await onLeaveGame(gameState.gameStartTime);
-      console.log('Game left successfully, navigating to main screen');
+    if (gameState.gameState === 'ended') {
+      // Allow leaving without penalty after the game has ended
       router.push('/main');
-    } catch (error) {
-      console.error('Detailed error in handleConfirmLeave:', error);
-      if (axios.isAxiosError(error)) {
-        console.error('Axios error details:', error.response?.data);
+    } else {
+      try {
+        await onLeaveGame(gameState.gameStartTime);
+        router.push('/main');
+      } catch (error) {
+        console.error('Error leaving game:', error);
+        alert('Failed to leave game. Please try again.');
       }
-      alert('Failed to leave game. Please try again.');
     }
   };
 
@@ -272,7 +284,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
             className="absolute top-4 right-4 bg-white h-10 px-4"
             onClick={handleLeaveGameClick}
           >
-            Leave Game
+            {gameState.gameState === 'ended' ? 'Return to Main' : 'Leave Game'}
           </Button>
         </div>
         <h1 className="text-5xl font-bold text-center mb-8 text-white">{mode}</h1>
@@ -346,30 +358,32 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
               </div>
             )}
             {gameState.gameState === 'reportScore' && (
-              <div className="text-5xl font-bold text-white bg-black bg-opacity-50 p-8 rounded-xl flex flex-col items-center">
-                <div>Report Score</div>
-                <div className="mt-2 text-8xl">{formatTime(gameState.reportScoreTime)}</div>
-                <div className="flex justify-center items-center space-x-8 mt-4">
-                  <Input 
-                    type="number" 
-                    value={gameState.blueScore} 
-                    onChange={(e) => setGameState(prevState => ({ ...prevState, blueScore: Number(e.target.value) }))}
-                    className="w-24 h-24 text-4xl text-center text-blue-500 bg-white"
-                  />
-                  <span className="text-white">-</span>
-                  <Input 
-                    type="number" 
-                    value={gameState.redScore} 
-                    onChange={(e) => setGameState(prevState => ({ ...prevState, redScore: Number(e.target.value) }))}
-                    className="w-24 h-24 text-4xl text-center text-red-500 bg-white"
-                  />
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <div className="text-5xl font-bold text-white bg-black bg-opacity-50 p-8 rounded-xl flex flex-col items-center">
+                  <div>Report Score</div>
+                  <div className="mt-2 text-8xl">{formatTime(gameState.reportScoreTime)}</div>
+                  <div className="flex justify-center items-center space-x-8 mt-4">
+                    <Input 
+                      type="number" 
+                      value={gameState.blueScore} 
+                      onChange={(e) => setGameState(prevState => ({ ...prevState, blueScore: Number(e.target.value) }))}
+                      className="w-24 h-24 text-4xl text-center text-blue-500 bg-white"
+                    />
+                    <span className="text-white">-</span>
+                    <Input 
+                      type="number" 
+                      value={gameState.redScore} 
+                      onChange={(e) => setGameState(prevState => ({ ...prevState, redScore: Number(e.target.value) }))}
+                      className="w-24 h-24 text-4xl text-center text-red-500 bg-white"
+                    />
+                  </div>
+                  <Button 
+                    onClick={handleReportScore}
+                    className="mt-4 bg-green-500 hover:bg-green-600 text-white"
+                  >
+                    Submit Score
+                  </Button>
                 </div>
-                <Button 
-                  onClick={handleReportScore}
-                  className="mt-4 bg-green-500 hover:bg-green-600 text-white"
-                >
-                  Submit Score
-                </Button>
               </div>
             )}
             {gameState.gameState === 'ended' && (

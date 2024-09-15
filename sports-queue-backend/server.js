@@ -400,6 +400,16 @@ async function startServer() {
         });
       }
   
+      // Check if user is already in a game
+      const activeGame = await Game.findOne({ 
+        players: req.userId,
+        status: { $in: ['lobby', 'inProgress'] }
+      });
+
+      if (activeGame) {
+        return res.status(400).json({ error: 'You are already in a game' });
+      }
+
       const user = await User.findById(req.userId);
       const newQueueEntry = new Queue({
         userId: req.userId,
@@ -407,7 +417,7 @@ async function startServer() {
       });
       await newQueueEntry.save();
       
-      // Always create a match
+      // Always create a match (for testing purposes)
       const match = await createMatch(gameMode, user);
       if (match) {
         res.json({ message: 'Match found', match });

@@ -399,14 +399,18 @@ export default function MainScreen() {
           setQueueStatus('queuing');
         }
       } catch (error) {
-        if (axios.isAxiosError(error) && error.response?.status === 403) {
-          const penaltyEndTime = new Date(error.response.data.penaltyEndTime);
-          setIsPenalized(true);
-          setPenaltyEndTime(penaltyEndTime);
-          alert(`You are currently penalized and cannot join games until ${penaltyEndTime.toLocaleString()}`);
-        } else {
-          console.error('Failed to join queue:', error);
-          alert('Failed to join queue. Please try again.');
+        if (axios.isAxiosError(error)) {
+          if (error.response?.status === 403) {
+            const penaltyEndTime = new Date(error.response.data.penaltyEndTime);
+            setIsPenalized(true);
+            setPenaltyEndTime(penaltyEndTime);
+            alert(`You are currently penalized and cannot join games until ${penaltyEndTime.toLocaleString()}`);
+          } else if (error.response?.status === 400) {
+            alert(error.response.data.error);
+          } else {
+            console.error('Failed to join queue:', error);
+            alert('Failed to join queue. Please try again.');
+          }
         }
       }
     } else if (queueStatus === 'queuing') {
