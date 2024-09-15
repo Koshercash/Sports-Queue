@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ArrowLeft } from 'lucide-react'
@@ -10,6 +8,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { UserProfile } from '@/components/UserProfile'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
+import { Check } from 'lucide-react'
+import { useGameContext } from '../GameContext'
 
 interface Player {
   id: string;
@@ -42,6 +42,18 @@ interface UserProfileData {
 }
 
 export default function GameScreen({ mode = '5v5', players, currentUserId, onBackToMain, onLeaveGame, lobbyTime }: GameScreenProps) {
+  const {
+    gameState, setGameState,
+    totalGameTime, setTotalGameTime,
+    gameTime, setGameTime,
+    reportScoreTime, setReportScoreTime,
+    blueScore, setBlueScore,
+    redScore, setRedScore,
+    halfTimeOccurred, setHalfTimeOccurred,
+    isReady, setIsReady,
+    readyCount, setReadyCount
+  } = useGameContext();
+
   const [showChat, setShowChat] = useState(false)
   const [showPlayerList, setShowPlayerList] = useState(false)
   const [chatMessages, setChatMessages] = useState<{ sender: string; message: string; team: 'blue' | 'red' }[]>([])
@@ -218,6 +230,26 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
   const fieldLocation = getFieldLocation();
 
+  const handleReadyUp = () => {
+    if (gameState === 'lobby') {
+      const newReadyState = !isReady;
+      setIsReady(newReadyState);
+      setReadyCount((prevCount: number) => newReadyState ? prevCount + 1 : prevCount - 1);
+      
+      if (newReadyState) {
+        setGameState('inProgress');
+        setTotalGameTime(120); // Reset total game time to 120 seconds
+        setHalfTimeOccurred(false);
+      }
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div className="min-h-screen bg-white text-black relative flex flex-col">
       <div className="absolute inset-0 flex">
@@ -260,7 +292,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
           {userPlayer && (
             <div className={`absolute ${userPlayer.team === 'blue' ? 'left-1/4' : 'right-1/4'} inset-y-0 transform ${userPlayer.team === 'blue' ? '-translate-x-1/2' : 'translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
               <p className="text-4xl font-bold text-white mb-2">Position:</p>
-              <div className={`w-40 h-40 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative`}>
+              <div className={`w-48 h-48 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative`}>
                 <div className="w-full h-full relative">
                   {userPlayer.profilePicture ? (
                     <Image
@@ -287,7 +319,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
               <p className="text-4xl font-bold text-white mb-2">Field Location:</p>
               <p className="text-3xl text-white">{fieldLocation.name}</p>
             </div>
-            <div className="w-48 h-48 relative">
+            <div className="w-56 h-56 relative">
               <Image
                 src={fieldLocation.image}
                 alt="Field Location"
@@ -298,12 +330,73 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
             </div>
             <a href={fieldLocation.gpsLink} target="_blank" rel="noopener noreferrer" className="text-2xl text-blue-300 underline">GPS Link</a>
           </div>
+
+          {/* Game state display */}
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center">
+            {gameState === 'inProgress' && (
+              <div className="text-8xl font-bold text-white">
+                {formatTime(totalGameTime)}
+              </div>
+            )}
+            {gameState === 'halftime' && (
+              <div className="text-5xl font-bold text-white absolute top-8 left-1/2 transform -translate-x-1/2">
+                <div>HALFTIME</div>
+                <div className="mt-2 text-6xl">{formatTime(gameTime)}</div>
+              </div>
+            )}
+            {gameState === 'reportScore' && (
+              <div className="text-5xl font-bold text-white">
+                <div>Report Score</div>
+                <div className="mt-2 text-8xl">{formatTime(reportScoreTime)}</div>
+                <div className="flex justify-center items-center space-x-8 mt-4">
+                  <Input 
+                    type="number" 
+                    value={blueScore} 
+                    onChange={(e) => setBlueScore(Number(e.target.value))}
+                    className="w-24 h-24 text-4xl text-center text-blue-500 bg-white"
+                  />
+                  <span className="text-white">-</span>
+                  <Input 
+                    type="number" 
+                    value={redScore} 
+                    onChange={(e) => setRedScore(Number(e.target.value))}
+                    className="w-24 h-24 text-4xl text-center text-red-500 bg-white"
+                  />
+                </div>
+              </div>
+            )}
+            {gameState === 'ended' && (
+              <div className="text-5xl font-bold text-green-300 flex flex-col items-center">
+                <div className="mb-4">Game Result:</div>
+                <div className="flex justify-center items-center space-x-8">
+                  <span className="text-blue-500 text-9xl">{blueScore}</span>
+                  <span className="text-white text-7xl">-</span>
+                  <span className="text-red-500 text-9xl">{redScore}</span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="flex justify-center mb-8">
-          <Button className="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white text-3xl font-bold px-12 py-6 rounded-xl shadow-lg transform transition-all duration-200 ease-in-out hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-green-300">
-            READY UP
-          </Button>
+        <div className="flex items-center justify-center mb-8">
+          {gameState === 'lobby' ? (
+            <>
+              <Button 
+                className="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white text-3xl font-bold px-12 py-6 rounded-xl shadow-lg transform transition-all duration-200 ease-in-out hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-green-300"
+                onClick={handleReadyUp}
+              >
+                READY UP
+              </Button>
+              {isReady && <Check className="text-green-500 w-16 h-16 ml-4" />}
+            </>
+          ) : (
+            <Button 
+              className="bg-gray-400 text-white text-3xl font-bold px-12 py-6 rounded-xl cursor-not-allowed"
+              disabled
+            >
+              GAME IN PROGRESS
+            </Button>
+          )}
         </div>
 
         <div className="flex justify-between items-center mb-4">
