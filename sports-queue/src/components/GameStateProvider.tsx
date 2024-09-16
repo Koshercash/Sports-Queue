@@ -14,6 +14,25 @@ interface GameState {
   readyCount: number;
   gameStartTime: Date | null; // Add this line
   lobbyTime: number; // Add this line
+  mode?: '5v5' | '11v11';
+  players?: Player[]; // Define Player type if not already defined
+  match?: Match; // Define Match type if not already defined
+  isReturning?: boolean;
+  [key: string]: any; // This allows for additional properties
+}
+
+// Define these types if not already defined elsewhere
+interface Player {
+  id: string;
+  name: string;
+  position: string;
+  team: 'blue' | 'red';
+  profilePicture?: string | null;
+}
+
+interface Match {
+  team1: Player[];
+  team2: Player[];
 }
 
 interface GameStateContextType {
@@ -56,34 +75,30 @@ export const GameStateProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const newTotalGameTime = prevState.totalGameTime - 1;
 
           if (prevState.gameState === 'inProgress' && newTotalGameTime === halfTime && !prevState.halfTimeOccurred) {
-            // Trigger halftime when we reach the halfway point and it hasn't occurred yet
             return {
               ...prevState,
               gameState: 'halftime',
               halfTimeOccurred: true,
               totalGameTime: 15, // 15 seconds for halftime
-            };
+            } as GameState;
           } else if (prevState.gameState === 'halftime' && newTotalGameTime <= 0) {
-            // Transition back to inProgress after halftime
             return {
               ...prevState,
               gameState: 'inProgress',
               totalGameTime: halfTime, // Reset for second half
-            };
+            } as GameState;
           } else if (prevState.gameState === 'inProgress' && newTotalGameTime <= 0) {
-            // End the game
             return {
               ...prevState,
               gameState: 'reportScore',
               reportScoreTime: 30, // 30 seconds to report score
-            };
+            } as GameState;
           }
 
-          // Normal time decrement
           return {
             ...prevState,
             totalGameTime: newTotalGameTime,
-          };
+          } as GameState;
         });
       }, 1000);
     } else if (gameState.gameState === 'reportScore') {
@@ -94,12 +109,12 @@ export const GameStateProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             return {
               ...prevState,
               gameState: 'ended',
-            };
+            } as GameState;
           }
           return {
             ...prevState,
             reportScoreTime: prevState.reportScoreTime - 1,
-          };
+          } as GameState;
         });
       }, 1000);
     }

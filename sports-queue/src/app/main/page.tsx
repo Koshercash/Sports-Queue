@@ -134,7 +134,6 @@ export default function MainScreen() {
   const handleBackFromGame = (gameJustEnded = false) => {
     console.log('Handling back from game');
     if (gameJustEnded) {
-      // If the game just ended, reset everything
       setInGame(false);
       setIsGameInProgress(false);
       setMatch(null);
@@ -144,7 +143,6 @@ export default function MainScreen() {
       localStorage.removeItem('gameState');
       setShouldRefreshMatchHistory(true);
     } else {
-      // If just using the back button, preserve the game state
       const savedGameState = localStorage.getItem('gameState');
       if (savedGameState) {
         const parsedGameState = JSON.parse(savedGameState);
@@ -166,7 +164,10 @@ export default function MainScreen() {
       console.log('Parsed game state:', parsedGameState);
       if (parsedGameState.isReturning) {
         setInGame(true);
-        setGameState(parsedGameState.gameState);
+        setGameState({
+          ...parsedGameState,
+          gameStartTime: parsedGameState.gameStartTime ? new Date(parsedGameState.gameStartTime) : null,
+        });
         setMatch({
           team1: parsedGameState.players.filter((p: Player) => p.team === 'blue'),
           team2: parsedGameState.players.filter((p: Player) => p.team === 'red')
@@ -175,6 +176,7 @@ export default function MainScreen() {
         setIsGameInProgress(true);
         setLobbyTime(parsedGameState.lobbyTime || 0);
         setQueueStatus('matched');
+        
         // Remove the isReturning flag
         localStorage.setItem('gameState', JSON.stringify({
           ...parsedGameState,
@@ -189,9 +191,13 @@ export default function MainScreen() {
   };
 
   const toggleQueue = async () => {
-    if (isGameInProgress) {
-      handleReturnToGame();
-      return;
+    const savedGameState = localStorage.getItem('gameState');
+    if (savedGameState) {
+      const parsedGameState = JSON.parse(savedGameState);
+      if (parsedGameState.isReturning || isGameInProgress) {
+        handleReturnToGame();
+        return;
+      }
     }
 
     // Check penalty status before joining queue
@@ -464,7 +470,26 @@ export default function MainScreen() {
         params: { limit: 5 } // Fetch at least 5 recent games
       });
       console.log('Fetched match history:', response.data);
-      setMatchHistory(response.data);
+
+      // Add a sample match to the match history
+      const sampleMatch: RecentGame = {
+        id: 'sample-match-id',
+        mode: '5v5',
+        blueScore: 3,
+        redScore: 2,
+        location: 'Sample Stadium',
+        endTime: new Date().toISOString(),
+        players: [
+          { id: 'player1', name: 'John Doe' },
+          { id: 'player2', name: 'Jane Smith' },
+          { id: 'player3', name: 'Bob Johnson' },
+          { id: 'player4', name: 'Alice Brown' },
+          { id: 'player5', name: 'Charlie Davis' },
+        ],
+        distance: 5
+      };
+
+      setMatchHistory([sampleMatch, ...response.data]);
       setShouldRefreshMatchHistory(false);
     } catch (error) {
       console.error('Failed to fetch match history:', error);

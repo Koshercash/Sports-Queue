@@ -92,7 +92,10 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
       ...gameState,
       mode,
       players,
-      isReturning: true
+      isReturning: true,
+      lobbyTime: gameState.lobbyTime,
+      gameStartTime: gameState.gameStartTime,
+      totalGameTime: gameState.totalGameTime,
     };
     console.log('Saving game state:', gameStateToSave);
     localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
@@ -329,17 +332,17 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         location: fieldLocation.name,
       };
 
-      await axios.post('http://localhost:3002/api/game/result', gameResult, {
+      const response = await axios.post('http://localhost:3002/api/game/result', gameResult, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      // Set the gameEnded flag in localStorage
+      console.log('Game result saved:', response.data);
+
       localStorage.setItem('gameState', JSON.stringify({
         ...JSON.parse(localStorage.getItem('gameState') || '{}'),
         gameEnded: true
       }));
 
-      // Call onBackToMain to return to the main screen
       onBackToMain(true); // Pass true to indicate a game just ended
     } catch (error) {
       console.error('Failed to save game result:', error);
