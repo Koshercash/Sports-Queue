@@ -58,16 +58,8 @@ async function startServer() {
   });
 
 
-  const Friend = mongoose.model('Friend', FriendSchema);
-
-  const QueueSchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    gameMode: String,
-    timestamp: { type: Date, default: Date.now }
-  });
-
-  const Queue = mongoose.model('Queue', QueueSchema);
- 
+  const Friend = mongoose.model('Friend', FriendSchema)
+  
   const GameSchema = new mongoose.Schema({
     players: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     gameMode: String,
@@ -77,6 +69,14 @@ async function startServer() {
   });
   
   const Game = mongoose.model('Game', GameSchema);
+
+  const QueueSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    gameMode: String,
+    timestamp: { type: Date, default: Date.now }
+  });
+
+  const Queue = mongoose.model('Queue', QueueSchema);
 
   const PenaltySchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

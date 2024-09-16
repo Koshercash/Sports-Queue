@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -366,24 +367,11 @@ export default function MainScreen() {
   };
 
   const toggleQueue = async () => {
-    // Check if there's an existing game state in localStorage
-    const savedGameState = localStorage.getItem('gameState');
-    if (savedGameState) {
-      const parsedGameState = JSON.parse(savedGameState);
-      if (parsedGameState.gameState !== 'lobby' && parsedGameState.gameState !== 'ended') {
-        setInGame(true);
-        setGameState('inGame');
-        if (parsedGameState.match) {
-          setMatch(parsedGameState.match);
-        }
-        setIsGameInProgress(true); // Set this only when actually entering the game
-        return;
-      }
+    // If there's an ongoing game, return to it
+    if (isGameInProgress) {
+      setInGame(true);
+      return;
     }
-
-    // If we're not in a game, reset these states
-    setIsGameInProgress(false);
-    setInGame(false);
 
     // Check penalty status before joining queue
     await checkPenaltyStatus();
@@ -551,9 +539,8 @@ export default function MainScreen() {
     setInGame(false);
     setGameState('idle');
     setQueueStatus('idle');
-    setIsGameInProgress(false);
-    // Clear the game state from localStorage
-    localStorage.removeItem('gameState');
+    // Don't set isGameInProgress to false here
+    // Don't clear the match data
   };
 
   const handleLeaveGame = async (gameStartTime: Date | null) => {
@@ -604,14 +591,32 @@ export default function MainScreen() {
   };
 
   useEffect(() => {
-    // Clear any existing game state when the MainScreen mounts
-    localStorage.removeItem('gameState');
-    setInGame(false);
-    setGameState('idle');
-    setQueueStatus('idle');
-    setIsGameInProgress(false);
+    // Check for existing game state when the component mounts or updates
+    const savedGameState = localStorage.getItem('gameState');
+    if (savedGameState) {
+      const parsedGameState = JSON.parse(savedGameState);
+      if (parsedGameState.isReturning) {
+        // We're returning from the game screen, so set the states accordingly
+        setInGame(false);
+        setGameState(parsedGameState.gameState);
+        setMatch(parsedGameState.match);
+        setIsGameInProgress(true);
+        // Remove the isReturning flag
+        localStorage.setItem('gameState', JSON.stringify({
+          ...parsedGameState,
+          isReturning: false
+        }));
+      } else if (parsedGameState.gameState === 'inGame' && parsedGameState.match) {
+        // If there's an ongoing game, set the states to return to it
+        setInGame(true);
+        setGameState('inGame');
+        setMatch(parsedGameState.match);
+        setIsGameInProgress(true);
+      }
+    }
   }, []);
 
+  // Render the GameScreen component if inGame is true
   if (inGame && match) {
     return (
       <GameScreen
@@ -631,6 +636,7 @@ export default function MainScreen() {
     );
   }
 
+  // Main return statement for the MainScreen component
   return (
     <div className="min-h-screen bg-white text-black relative overflow-hidden">
       {activeTab === 'home' && <div className={styles.backgroundText}></div>}
@@ -745,7 +751,7 @@ export default function MainScreen() {
                         <AvatarFallback>R{rank}</AvatarFallback>
                       </Avatar>
                       <span>Player {rank}</span>
-                      <span className="ml-auto">MMR: {2000 - (rank * 100)}</span>
+                      <span className="ml-auto">MRR: {2000 - (rank * 100)}</span>
                     </li>
                   ))}
                 </ul>

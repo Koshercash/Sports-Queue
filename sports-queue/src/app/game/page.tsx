@@ -43,6 +43,7 @@ interface UserProfileData {
 }
 
 export default function GameScreen({ mode = '5v5', players, currentUserId, onBackToMain, onLeaveGame, lobbyTime }: GameScreenProps) {
+  const router = useRouter();
   const { gameState, setGameState } = useGameState();
   const [showChat, setShowChat] = useState(false)
   const [showPlayerList, setShowPlayerList] = useState(false)
@@ -51,7 +52,6 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   const [selectedProfile, setSelectedProfile] = useState<UserProfileData | null>(null);
   const [showLeavePrompt, setShowLeavePrompt] = useState(false)
   const [leaveWarningMessage, setLeaveWarningMessage] = useState('')
-  const router = useRouter();
 
   useEffect(() => {
     // Load game state from localStorage on component mount
@@ -233,8 +233,12 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   };
 
   const handleBackClick = () => {
-    // Simply call onBackToMain without clearing any game state
-    onBackToMain();
+    // Save the current game state to localStorage before navigating
+    localStorage.setItem('gameState', JSON.stringify({
+      ...gameState,
+      isReturning: true // Add a flag to indicate we're returning from the game screen
+    }));
+    onBackToMain(); // Call the onBackToMain prop instead of using router.push
   };
 
   const positionOrder = ['goalkeeper', 'defender', 'midfielder', 'striker'];
