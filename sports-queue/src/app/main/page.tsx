@@ -15,7 +15,7 @@ import { InteractableProfilePicture } from '../../components/InteractableProfile
 import Link from 'next/link';
 import styles from './styles.module.css';
 import GameScreen from '../game/page';
-import { useGeolocation } from '@/hooks/useGeolocation'; // You'll need to create this hook
+import { useGeolocation } from '@/hooks/useGeolocation';
 import MatchHistory from '@/components/MatchHistory';
 
 interface UserProfile {
@@ -95,99 +95,25 @@ export default function MainScreen() {
   const [removeMessage, setRemoveMessage] = useState<string | null>(null);
   const [friendToRemove, setFriendToRemove] = useState<Friend | null>(null);
 
-  // Add a new state for friends search query
   const [friendSearchQuery, setFriendSearchQuery] = useState('');
-
-  // Add this near the top of your component
   const [isSearchResultsVisible, setIsSearchResultsVisible] = useState(true);
-
   const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
-
-  // Add a new state for new messages (this is a placeholder, you'll need to implement message fetching)
   const [newMessages, setNewMessages] = useState<number>(0);
-
-  // Calculate total notifications
-  const totalNotifications = pendingRequests.length + newMessages;
-
   const [notificationsViewed, setNotificationsViewed] = useState(false);
-
   const [activeTab, setActiveTab] = useState('home');
-
   const [infoDialogOpen, setInfoDialogOpen] = useState(false);
-
-  const [matchStarted, setMatchStarted] = useState(false);
-
   const [inGame, setInGame] = useState(false);
-
   const [gameState, setGameState] = useState<'idle' | 'loading' | 'inGame'>('idle');
-
   const [isPenalized, setIsPenalized] = useState(false);
   const [penaltyEndTime, setPenaltyEndTime] = useState<Date | null>(null);
-
-  // Add this new state to track if a game is in progress
   const [isGameInProgress, setIsGameInProgress] = useState(false);
-
   const [lobbyTime, setLobbyTime] = useState(0);
 
   const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
   const { latitude, longitude, error: geoError } = useGeolocation();
-
-  // Add this state for match history
   const [matchHistory, setMatchHistory] = useState<RecentGame[]>([]);
 
-  // Add this function to fetch match history
-  const fetchMatchHistory = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await axios.get<RecentGame[]>('http://localhost:3002/api/user/match-history', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      console.log('Fetched match history:', response.data);
-      setMatchHistory(response.data);
-    } catch (error) {
-      console.error('Failed to fetch match history:', error);
-    }
-  };
-
-  // Call fetchMatchHistory in useEffect
-  useEffect(() => {
-    fetchMatchHistory();
-  }, []);
-
-  // Add this function to check penalty status
-  const checkPenaltyStatus = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-
-      const response = await axios.get('http://localhost:3002/api/penalty/status', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      if (response.data.isPenalized) {
-        setIsPenalized(true);
-        setPenaltyEndTime(new Date(response.data.penaltyEndTime));
-        setQueueStatus('idle');
-        setGameState('idle');
-        setIsGameInProgress(false);
-      } else {
-        setIsPenalized(false);
-        setPenaltyEndTime(null);
-      }
-    } catch (error) {
-      console.error('Error checking penalty status:', error);
-    }
-  };
-
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isGameInProgress) {
-      interval = setInterval(() => {
-        setLobbyTime(prevTime => prevTime + 1);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isGameInProgress]);
+  const totalNotifications = pendingRequests.length + newMessages;
 
   const handleTabChange = (value: string) => {
     setActiveTab(value);
@@ -196,38 +122,97 @@ export default function MainScreen() {
     }
   };
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (queueStatus === 'queuing') {
-      interval = setInterval(() => {
-        setDots(prev => (prev.length >= 3 ? '' : prev + '.'));
-      }, 750); // Slowed down to 750ms (3/4 of a second)
+  const handleReturnToGame = () => {
+    const savedGameState = localStorage.getItem('gameState');
+    if (savedGameState) {
+      const parsedGameState = JSON.parse(savedGameState);
+      setInGame(parsedGameState.isReturning ? false : true);
+      setGameState(parsedGameState.gameState);
+      setMatch(parsedGameState.match);
+      setGameMode(parsedGameState.mode);
+      setIsGameInProgress(true);
+      // Remove the isReturning flag
+      localStorage.setItem('gameState', JSON.stringify({
+        ...parsedGameState,
+        isReturning: false
+      }));
     }
-    return () => clearInterval(interval);
-  }, [queueStatus]);
+  };
 
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      router.push('/');
+  const toggleQueue = async () => {
+    if (isGameInProgress) {
+      handleReturnToGame();
       return;
     }
 
-    const initializeApp = async () => {
-      await checkPenaltyStatus(); // Check penalty status immediately
-      await fetchUserProfile();
-      await fetchFriends();
-    };
+    // Check penalty status before joining queue
+    await checkPenaltyStatus();
 
-    initializeApp();
+    if (isPenalized) {
+      alert(`You are currently penalized and cannot join games until ${penaltyEndTime?.toLocaleString()}`);
+      return;
+    }
 
-    const intervalId = setInterval(() => {
-      checkPenaltyStatus();
-      fetchUserProfile();
-    }, 60000); // Refresh penalty status and profile every minute
-
-    return () => clearInterval(intervalId);
-  }, [router]);
+    if (queueStatus === 'idle') {
+      try {
+        const token = localStorage.getItem('token');
+        console.log('Attempting to join queue with token:', token ? 'Token exists' : 'No token');
+        const response = await axios.post('http://localhost:3002/api/queue/join', 
+          { gameMode },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        console.log('Queue join response:', response.data);
+        if (response.data.match) {
+          setQueueStatus('matched');
+          setMatch(response.data.match);
+          setGameState('loading');
+          setTimeout(() => {
+            setGameState('inGame');
+            setInGame(true);
+            setIsGameInProgress(true);
+            // Save the game state to localStorage
+            localStorage.setItem('gameState', JSON.stringify({
+              gameState: 'inGame',
+              match: response.data.match
+            }));
+          }, 3000);
+        } else {
+          setQueueStatus('queuing');
+        }
+      } catch (error) {
+        console.error('Detailed error in joining queue:', error);
+        if (axios.isAxiosError(error)) {
+          console.error('Axios error details:', error.response?.data);
+          if (error.response?.status === 403) {
+            const penaltyEndTime = new Date(error.response.data.penaltyEndTime);
+            setIsPenalized(true);
+            setPenaltyEndTime(penaltyEndTime);
+            alert(`You are currently penalized and cannot join games until ${penaltyEndTime.toLocaleString()}`);
+          } else if (error.response?.status === 400) {
+            alert(error.response.data.error);
+          } else {
+            alert(`Failed to join queue: ${error.response?.data?.error || error.message}`);
+          }
+        } else {
+          // Handle the case where error is of type unknown
+          alert(`Failed to join queue: ${error instanceof Error ? error.message : 'An unknown error occurred'}`);
+        }
+      }
+    } else if (queueStatus === 'queuing') {
+      try {
+        const token = localStorage.getItem('token');
+        await axios.post('http://localhost:3002/api/queue/leave', 
+          { gameMode },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setQueueStatus('idle');
+        setDots(''); // Reset dots when leaving queue
+      } catch (error) {
+        console.error('Failed to leave queue:', error);
+        alert('Failed to leave queue. Please try again.');
+      }
+    }
+  };
 
   const fetchUserProfile = async (userId?: string) => {
     try {
@@ -404,122 +389,42 @@ export default function MainScreen() {
     }
   };
 
-  const toggleQueue = async () => {
-    // If there's an ongoing game, return to it
-    if (isGameInProgress) {
-      setInGame(true);
-      return;
-    }
+  const checkPenaltyStatus = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
 
-    // Check penalty status before joining queue
-    await checkPenaltyStatus();
+      const response = await axios.get('http://localhost:3002/api/penalty/status', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
-    if (isPenalized) {
-      alert(`You are currently penalized and cannot join games until ${penaltyEndTime?.toLocaleString()}`);
-      return;
-    }
-
-    if (queueStatus === 'idle') {
-      try {
-        const token = localStorage.getItem('token');
-        console.log('Attempting to join queue with token:', token ? 'Token exists' : 'No token');
-        const response = await axios.post('http://localhost:3002/api/queue/join', 
-          { gameMode },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        console.log('Queue join response:', response.data);
-        if (response.data.match) {
-          setQueueStatus('matched');
-          setMatch(response.data.match);
-          setGameState('loading');
-          setTimeout(() => {
-            setGameState('inGame');
-            setInGame(true);
-            setIsGameInProgress(true);
-            // Save the game state to localStorage
-            localStorage.setItem('gameState', JSON.stringify({
-              gameState: 'inGame',
-              match: response.data.match
-            }));
-          }, 3000);
-        } else {
-          setQueueStatus('queuing');
-        }
-      } catch (error) {
-        console.error('Detailed error in joining queue:', error);
-        if (axios.isAxiosError(error)) {
-          console.error('Axios error details:', error.response?.data);
-          if (error.response?.status === 403) {
-            const penaltyEndTime = new Date(error.response.data.penaltyEndTime);
-            setIsPenalized(true);
-            setPenaltyEndTime(penaltyEndTime);
-            alert(`You are currently penalized and cannot join games until ${penaltyEndTime.toLocaleString()}`);
-          } else if (error.response?.status === 400) {
-            alert(error.response.data.error);
-          } else {
-            alert(`Failed to join queue: ${error.response?.data?.error || error.message}`);
-          }
-        } else {
-          // Handle the case where error is of type unknown
-          alert(`Failed to join queue: ${error instanceof Error ? error.message : 'An unknown error occurred'}`);
-        }
-      }
-    } else if (queueStatus === 'queuing') {
-      try {
-        const token = localStorage.getItem('token');
-        await axios.post('http://localhost:3002/api/queue/leave', 
-          { gameMode },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
+      if (response.data.isPenalized) {
+        setIsPenalized(true);
+        setPenaltyEndTime(new Date(response.data.penaltyEndTime));
         setQueueStatus('idle');
-        setDots(''); // Reset dots when leaving queue
-      } catch (error) {
-        console.error('Failed to leave queue:', error);
-        alert('Failed to leave queue. Please try again.');
+        setGameState('idle');
+        setIsGameInProgress(false);
+      } else {
+        setIsPenalized(false);
+        setPenaltyEndTime(null);
       }
+    } catch (error) {
+      console.error('Error checking penalty status:', error);
     }
   };
 
-  useEffect(() => {
-    console.log('Current friends state:', friends);
-    friends.forEach(friend => {
-      console.log(`Friend ${friend.name}:`, {
-        id: friend.id,
-        profilePicture: friend.profilePicture
+  const fetchMatchHistory = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get<RecentGame[]>('http://localhost:3002/api/user/match-history', {
+        headers: { Authorization: `Bearer ${token}` }
       });
-    });
-  }, [friends]);
-
-  // Add a function to filter friends based on the search query
-  const filteredFriends = friends.filter(friend => 
-    friend.name.toLowerCase().includes(friendSearchQuery.toLowerCase())
-  );
-
-  useEffect(() => {
-    console.log('Friends state updated:', friends);
-  }, [friends]);
-
-  useEffect(() => {
-    localStorage.setItem('friends', JSON.stringify(friends));
-  }, [friends]);
-
-  // Add this at the beginning of the MainScreen component
-  useEffect(() => {
-    const storedFriends = localStorage.getItem('friends');
-    if (storedFriends) {
-      setFriends(JSON.parse(storedFriends));
+      console.log('Fetched match history:', response.data);
+      setMatchHistory(response.data);
+    } catch (error) {
+      console.error('Failed to fetch match history:', error);
     }
-  }, []);
-
-  useEffect(() => {
-    if (removeMessage) {
-      const timer = setTimeout(() => {
-        setRemoveMessage(null);
-      }, 5000); // Clear the message after 5 seconds
-
-      return () => clearTimeout(timer);
-    }
-  }, [removeMessage]);
+  };
 
   const handleBioChange = async (newBio: string) => {
     try {
@@ -567,20 +472,6 @@ export default function MainScreen() {
       console.error('Error updating profile picture:', error);
       alert('Failed to update profile picture. Please try again.');
     }
-  };
-
-  const handleStartMatch = () => {
-    setInGame(true);
-  };
-
-  const handleBackToMain = () => {
-    setInGame(false);
-    setGameState('idle');
-    setQueueStatus('idle');
-    setIsGameInProgress(false);
-    setMatch(null);
-    // Clear the game state from localStorage
-    localStorage.removeItem('gameState');
   };
 
   const handleLeaveGame = async (gameStartTime: Date | null) => {
@@ -631,38 +522,86 @@ export default function MainScreen() {
   };
 
   useEffect(() => {
-    // Check for existing game state when the component mounts or updates
-    const savedGameState = localStorage.getItem('gameState');
-    if (savedGameState) {
-      const parsedGameState = JSON.parse(savedGameState);
-      if (parsedGameState.isReturning) {
-        // We're returning from the game screen, so set the states accordingly
-        setInGame(false);
-        setGameState(parsedGameState.gameState);
-        setMatch(parsedGameState.match);
-        setIsGameInProgress(true);
-        // Remove the isReturning flag
-        localStorage.setItem('gameState', JSON.stringify({
-          ...parsedGameState,
-          isReturning: false
-        }));
-      } else if (parsedGameState.gameState !== 'ended' && parsedGameState.match) {
-        // If there's an ongoing game, set the states to return to it
-        setInGame(true);
-        setGameState(parsedGameState.gameState);
-        setMatch(parsedGameState.match);
-        setIsGameInProgress(true);
-      } else {
-        // If the game has ended or there's no match, clear the game state
-        localStorage.removeItem('gameState');
-        setInGame(false);
-        setGameState('idle');
-        setQueueStatus('idle');
-        setIsGameInProgress(false);
-        setMatch(null);
-      }
+    console.log('Current friends state:', friends);
+    friends.forEach(friend => {
+      console.log(`Friend ${friend.name}:`, {
+        id: friend.id,
+        profilePicture: friend.profilePicture
+      });
+    });
+  }, [friends]);
+
+  const filteredFriends = friends.filter(friend => 
+    friend.name.toLowerCase().includes(friendSearchQuery.toLowerCase())
+  );
+
+  useEffect(() => {
+    console.log('Friends state updated:', friends);
+  }, [friends]);
+
+  useEffect(() => {
+    localStorage.setItem('friends', JSON.stringify(friends));
+  }, [friends]);
+
+  useEffect(() => {
+    const storedFriends = localStorage.getItem('friends');
+    if (storedFriends) {
+      setFriends(JSON.parse(storedFriends));
     }
   }, []);
+
+  useEffect(() => {
+    if (removeMessage) {
+      const timer = setTimeout(() => {
+        setRemoveMessage(null);
+      }, 5000); // Clear the message after 5 seconds
+
+      return () => clearTimeout(timer);
+    }
+  }, [removeMessage]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (queueStatus === 'queuing') {
+      interval = setInterval(() => {
+        setDots(prev => (prev.length >= 3 ? '' : prev + '.'));
+      }, 750); // Slowed down to 750ms (3/4 of a second)
+    }
+    return () => clearInterval(interval);
+  }, [queueStatus]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      router.push('/');
+      return;
+    }
+
+    const initializeApp = async () => {
+      await checkPenaltyStatus(); // Check penalty status immediately
+      await fetchUserProfile();
+      await fetchFriends();
+    };
+
+    initializeApp();
+
+    const intervalId = setInterval(() => {
+      checkPenaltyStatus();
+      fetchUserProfile();
+    }, 60000); // Refresh penalty status and profile every minute
+
+    return () => clearInterval(intervalId);
+  }, [router]);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isGameInProgress) {
+      interval = setInterval(() => {
+        setLobbyTime(prevTime => prevTime + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isGameInProgress]);
 
   useEffect(() => {
     const fetchRecentGames = async () => {
@@ -683,6 +622,26 @@ export default function MainScreen() {
     fetchRecentGames();
   }, [latitude, longitude]);
 
+  useEffect(() => {
+    fetchMatchHistory();
+  }, []);
+
+  useEffect(() => {
+    const savedGameState = localStorage.getItem('gameState');
+    if (savedGameState) {
+      const parsedGameState = JSON.parse(savedGameState);
+      if (parsedGameState.isReturning) {
+        handleReturnToGame();
+      } else if (parsedGameState.gameState !== 'ended' && parsedGameState.match) {
+        setInGame(true);
+        setGameState(parsedGameState.gameState);
+        setMatch(parsedGameState.match);
+        setIsGameInProgress(true);
+        setGameMode(parsedGameState.mode);
+      }
+    }
+  }, []);
+
   // Render the GameScreen component if inGame is true
   if (inGame && match) {
     return (
@@ -696,7 +655,7 @@ export default function MainScreen() {
           profilePicture: player.profilePicture || null
         }))}
         currentUserId={userProfile?.id || ''}
-        onBackToMain={handleBackToMain}
+        onBackToMain={handleReturnToGame}
         onLeaveGame={handleLeaveGame}
         lobbyTime={lobbyTime}
       />

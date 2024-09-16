@@ -240,7 +240,11 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
       match: {
         team1: players.filter(p => p.team === 'blue'),
         team2: players.filter(p => p.team === 'red')
-      }
+      },
+      mode: mode,
+      players: players,
+      currentUserId: currentUserId,
+      lobbyTime: lobbyTime
     }));
     onBackToMain();
   };
@@ -338,16 +342,16 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
       <div className="relative z-10 p-4 flex-grow">
         <div className="flex items-center">
           <Button 
-            variant="default"
-            className="absolute top-4 left-4 bg-green-500 text-white hover:bg-green-600 h-10 px-3 text-sm flex items-center"
+            variant="outline"
+            className="absolute top-4 left-4 bg-white text-green-500 border-green-500 hover:bg-green-50 h-10 px-3 text-sm flex items-center"
             onClick={handleBackClick}
           >
             <ArrowLeft className="h-4 w-4 mr-1" />
             <span>Back</span>
           </Button>
           <Button 
-            variant="default"
-            className="absolute top-4 right-4 bg-green-500 text-white hover:bg-green-600 h-10 px-4"
+            variant="outline"
+            className="absolute top-4 right-4 bg-white text-green-500 border-green-500 hover:bg-green-50 h-10 px-4"
             onClick={handleLeaveGameClick}
           >
             {gameState.gameState === 'ended' ? 'Return to Main' : 'Leave Game'}
