@@ -67,6 +67,16 @@ async function startServer() {
   });
 
   const Queue = mongoose.model('Queue', QueueSchema);
+ 
+  const GameSchema = new mongoose.Schema({
+    players: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    gameMode: String,
+    status: { type: String, enum: ['lobby', 'inProgress', 'ended'], default: 'lobby' },
+    startTime: Date,
+    endTime: Date
+  });
+  
+  const Game = mongoose.model('Game', GameSchema);
 
   const PenaltySchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

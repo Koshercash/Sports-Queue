@@ -372,9 +372,18 @@ export default function MainScreen() {
       const parsedGameState = JSON.parse(savedGameState);
       if (parsedGameState.gameState !== 'lobby' && parsedGameState.gameState !== 'ended') {
         setInGame(true);
+        setGameState('inGame');
+        if (parsedGameState.match) {
+          setMatch(parsedGameState.match);
+        }
+        setIsGameInProgress(true); // Set this only when actually entering the game
         return;
       }
     }
+
+    // If we're not in a game, reset these states
+    setIsGameInProgress(false);
+    setInGame(false);
 
     // Check penalty status before joining queue
     await checkPenaltyStatus();
@@ -387,10 +396,12 @@ export default function MainScreen() {
     if (queueStatus === 'idle') {
       try {
         const token = localStorage.getItem('token');
+        console.log('Attempting to join queue with token:', token ? 'Token exists' : 'No token');
         const response = await axios.post('http://localhost:3002/api/queue/join', 
           { gameMode },
           { headers: { Authorization: `Bearer ${token}` } }
         );
+        console.log('Queue join response:', response.data);
         if (response.data.match) {
           setQueueStatus('matched');
           setMatch(response.data.match);
@@ -399,12 +410,19 @@ export default function MainScreen() {
             setGameState('inGame');
             setInGame(true);
             setIsGameInProgress(true);
+            // Save the game state to localStorage
+            localStorage.setItem('gameState', JSON.stringify({
+              gameState: 'inGame',
+              match: response.data.match
+            }));
           }, 3000);
         } else {
           setQueueStatus('queuing');
         }
       } catch (error) {
+        console.error('Detailed error in joining queue:', error);
         if (axios.isAxiosError(error)) {
+          console.error('Axios error details:', error.response?.data);
           if (error.response?.status === 403) {
             const penaltyEndTime = new Date(error.response.data.penaltyEndTime);
             setIsPenalized(true);
@@ -413,9 +431,11 @@ export default function MainScreen() {
           } else if (error.response?.status === 400) {
             alert(error.response.data.error);
           } else {
-            console.error('Failed to join queue:', error);
-            alert('Failed to join queue. Please try again.');
+            alert(`Failed to join queue: ${error.response?.data?.error || error.message}`);
           }
+        } else {
+          // Handle the case where error is of type unknown
+          alert(`Failed to join queue: ${error instanceof Error ? error.message : 'An unknown error occurred'}`);
         }
       }
     } else if (queueStatus === 'queuing') {
@@ -431,9 +451,6 @@ export default function MainScreen() {
         console.error('Failed to leave queue:', error);
         alert('Failed to leave queue. Please try again.');
       }
-    } else if (gameState === 'inGame') {
-      // Return to the game if it's already in progress
-      setInGame(true);
     }
   };
 
@@ -532,7 +549,11 @@ export default function MainScreen() {
 
   const handleBackToMain = () => {
     setInGame(false);
-    // We don't change isGameInProgress here, so the game is still considered in progress
+    setGameState('idle');
+    setQueueStatus('idle');
+    setIsGameInProgress(false);
+    // Clear the game state from localStorage
+    localStorage.removeItem('gameState');
   };
 
   const handleLeaveGame = async (gameStartTime: Date | null) => {
@@ -562,6 +583,9 @@ export default function MainScreen() {
         setIsPenalized(false);
         setPenaltyEndTime(null);
       }
+
+      // Clear the game state from localStorage
+      localStorage.removeItem('gameState');
     } catch (error) {
       console.error('Detailed error in handleLeaveGame:', error);
       if (axios.isAxiosError(error)) {
@@ -574,9 +598,19 @@ export default function MainScreen() {
       setGameState('idle');
       setIsGameInProgress(false);
       setLobbyTime(0); // Reset lobby time on error
+      localStorage.removeItem('gameState'); // Clear localStorage even on error
       throw error;
     }
   };
+
+  useEffect(() => {
+    // Clear any existing game state when the MainScreen mounts
+    localStorage.removeItem('gameState');
+    setInGame(false);
+    setGameState('idle');
+    setQueueStatus('idle');
+    setIsGameInProgress(false);
+  }, []);
 
   if (inGame && match) {
     return (

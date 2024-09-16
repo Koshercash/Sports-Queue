@@ -83,7 +83,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         readyCount: 0,
         gameStartTime: null,
       });
-      router.push('/main');
+      onBackToMain();
       return;
     }
 
@@ -233,6 +233,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   };
 
   const handleBackClick = () => {
+    // Simply call onBackToMain without clearing any game state
     onBackToMain();
   };
 
