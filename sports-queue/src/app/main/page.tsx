@@ -754,20 +754,18 @@ export default function MainScreen() {
               <CardContent>
                 {userProfile && (
                   <>
-                    <UserProfile
-                      {...userProfile}
-                      isCurrentUser={true}
-                      onProfilePictureChange={handleProfilePictureChange}
-                      onBioChange={handleBioChange}
-                    />
-                    <Tabs defaultValue="info" className="mt-6">
-                      <TabsList>
+                    <Tabs defaultValue="info" className="w-full">
+                      <TabsList className="grid w-full grid-cols-2 mb-6">
                         <TabsTrigger value="info">Info</TabsTrigger>
                         <TabsTrigger value="matchHistory">Match History</TabsTrigger>
                       </TabsList>
                       <TabsContent value="info">
-                        {/* Add any additional profile info here */}
-                        <div>Additional profile information goes here</div>
+                        <UserProfile
+                          {...userProfile}
+                          isCurrentUser={true}
+                          onProfilePictureChange={handleProfilePictureChange}
+                          onBioChange={handleBioChange}
+                        />
                       </TabsContent>
                       <TabsContent value="matchHistory">
                         <MatchHistory matches={matchHistory} />
