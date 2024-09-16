@@ -126,16 +126,11 @@ export default function MainScreen() {
     const savedGameState = localStorage.getItem('gameState');
     if (savedGameState) {
       const parsedGameState = JSON.parse(savedGameState);
-      setInGame(parsedGameState.isReturning ? false : true);
+      setInGame(true);
       setGameState(parsedGameState.gameState);
       setMatch(parsedGameState.match);
       setGameMode(parsedGameState.mode);
       setIsGameInProgress(true);
-      // Remove the isReturning flag
-      localStorage.setItem('gameState', JSON.stringify({
-        ...parsedGameState,
-        isReturning: false
-      }));
     }
   };
 
@@ -630,14 +625,13 @@ export default function MainScreen() {
     const savedGameState = localStorage.getItem('gameState');
     if (savedGameState) {
       const parsedGameState = JSON.parse(savedGameState);
-      if (parsedGameState.isReturning) {
-        handleReturnToGame();
-      } else if (parsedGameState.gameState !== 'ended' && parsedGameState.match) {
-        setInGame(true);
-        setGameState(parsedGameState.gameState);
-        setMatch(parsedGameState.match);
+      if (parsedGameState.gameState !== 'ended' && parsedGameState.match) {
         setIsGameInProgress(true);
         setGameMode(parsedGameState.mode);
+        setMatch(parsedGameState.match);
+      } else {
+        // Clear the game state if it's ended or invalid
+        localStorage.removeItem('gameState');
       }
     }
   }, []);
@@ -655,7 +649,7 @@ export default function MainScreen() {
           profilePicture: player.profilePicture || null
         }))}
         currentUserId={userProfile?.id || ''}
-        onBackToMain={handleReturnToGame}
+        onBackToMain={() => handleLeaveGame(null)}
         onLeaveGame={handleLeaveGame}
         lobbyTime={lobbyTime}
       />
