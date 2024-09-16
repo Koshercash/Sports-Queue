@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Button } from "../../components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "../../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,6 +15,8 @@ import { InteractableProfilePicture } from '../../components/InteractableProfile
 import Link from 'next/link';
 import styles from './styles.module.css';
 import GameScreen from '../game/page';
+import { useGeolocation } from '@/hooks/useGeolocation'; // You'll need to create this hook
+import MatchHistory from '@/components/MatchHistory';
 
 interface UserProfile {
   id: string;
@@ -66,6 +68,17 @@ interface PendingRequest {
   profilePicture: string | null;
 }
 
+interface RecentGame {
+  id: string;
+  mode: '5v5' | '11v11';
+  blueScore: number;
+  redScore: number;
+  location: string;
+  endTime: string;
+  distance: number;
+  players: { id: string; name: string }[];
+}
+
 export default function MainScreen() {
   const [gameMode, setGameMode] = useState<'5v5' | '11v11'>('5v5')
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
@@ -115,6 +128,31 @@ export default function MainScreen() {
   const [isGameInProgress, setIsGameInProgress] = useState(false);
 
   const [lobbyTime, setLobbyTime] = useState(0);
+
+  const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
+  const { latitude, longitude, error: geoError } = useGeolocation();
+
+  // Add this state for match history
+  const [matchHistory, setMatchHistory] = useState<RecentGame[]>([]);
+
+  // Add this function to fetch match history
+  const fetchMatchHistory = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get<RecentGame[]>('http://localhost:3002/api/user/match-history', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      console.log('Fetched match history:', response.data);
+      setMatchHistory(response.data);
+    } catch (error) {
+      console.error('Failed to fetch match history:', error);
+    }
+  };
+
+  // Call fetchMatchHistory in useEffect
+  useEffect(() => {
+    fetchMatchHistory();
+  }, []);
 
   // Add this function to check penalty status
   const checkPenaltyStatus = async () => {
@@ -539,8 +577,10 @@ export default function MainScreen() {
     setInGame(false);
     setGameState('idle');
     setQueueStatus('idle');
-    // Don't set isGameInProgress to false here
-    // Don't clear the match data
+    setIsGameInProgress(false);
+    setMatch(null);
+    // Clear the game state from localStorage
+    localStorage.removeItem('gameState');
   };
 
   const handleLeaveGame = async (gameStartTime: Date | null) => {
@@ -559,8 +599,8 @@ export default function MainScreen() {
       setMatch(null);
       setQueueStatus('idle');
       setGameState('idle');
-      setIsGameInProgress(false); // Only set this to false when actually leaving the game
-      setLobbyTime(0); // Reset lobby time only when actually leaving the game
+      setIsGameInProgress(false);
+      setLobbyTime(0);
 
       if (response.data.penalized) {
         setIsPenalized(true);
@@ -584,8 +624,8 @@ export default function MainScreen() {
       setQueueStatus('idle');
       setGameState('idle');
       setIsGameInProgress(false);
-      setLobbyTime(0); // Reset lobby time on error
-      localStorage.removeItem('gameState'); // Clear localStorage even on error
+      setLobbyTime(0);
+      localStorage.removeItem('gameState');
       throw error;
     }
   };
@@ -606,15 +646,42 @@ export default function MainScreen() {
           ...parsedGameState,
           isReturning: false
         }));
-      } else if (parsedGameState.gameState === 'inGame' && parsedGameState.match) {
+      } else if (parsedGameState.gameState !== 'ended' && parsedGameState.match) {
         // If there's an ongoing game, set the states to return to it
         setInGame(true);
-        setGameState('inGame');
+        setGameState(parsedGameState.gameState);
         setMatch(parsedGameState.match);
         setIsGameInProgress(true);
+      } else {
+        // If the game has ended or there's no match, clear the game state
+        localStorage.removeItem('gameState');
+        setInGame(false);
+        setGameState('idle');
+        setQueueStatus('idle');
+        setIsGameInProgress(false);
+        setMatch(null);
       }
     }
   }, []);
+
+  useEffect(() => {
+    const fetchRecentGames = async () => {
+      if (latitude && longitude) {
+        try {
+          const token = localStorage.getItem('token');
+          const response = await axios.get<RecentGame[]>('http://localhost:3002/api/games/recent', {
+            headers: { Authorization: `Bearer ${token}` },
+            params: { latitude, longitude }
+          });
+          setRecentGames(response.data);
+        } catch (error) {
+          console.error('Failed to fetch recent games:', error);
+        }
+      }
+    };
+
+    fetchRecentGames();
+  }, [latitude, longitude]);
 
   // Render the GameScreen component if inGame is true
   if (inGame && match) {
@@ -706,12 +773,27 @@ export default function MainScreen() {
               </CardHeader>
               <CardContent>
                 {userProfile && (
-                  <UserProfile
-                    {...userProfile}
-                    isCurrentUser={true}
-                    onProfilePictureChange={handleProfilePictureChange}
-                    onBioChange={handleBioChange}
-                  />
+                  <>
+                    <UserProfile
+                      {...userProfile}
+                      isCurrentUser={true}
+                      onProfilePictureChange={handleProfilePictureChange}
+                      onBioChange={handleBioChange}
+                    />
+                    <Tabs defaultValue="info" className="mt-6">
+                      <TabsList>
+                        <TabsTrigger value="info">Info</TabsTrigger>
+                        <TabsTrigger value="matchHistory">Match History</TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="info">
+                        {/* Add any additional profile info here */}
+                        <div>Additional profile information goes here</div>
+                      </TabsContent>
+                      <TabsContent value="matchHistory">
+                        <MatchHistory matches={matchHistory} />
+                      </TabsContent>
+                    </Tabs>
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -719,19 +801,25 @@ export default function MainScreen() {
           <TabsContent value="recent">
             <Card>
               <CardHeader>
-                <CardTitle>Recent Games</CardTitle>
-                <CardDescription>Games played near you</CardDescription>
+                <CardTitle>Recent Games Nearby</CardTitle>
+                <CardDescription>Games played within 50 miles of your location</CardDescription>
               </CardHeader>
               <CardContent>
-                <ul className="space-y-2">
-                  {[1, 2, 3].map((game) => (
-                    <li key={game} className="border-b pb-2">
-                      <p className="font-bold">Game {game}</p>
-                      <p>Score: 3 - 2</p>
-                      <p>Location: Central Park Field {game}</p>
-                    </li>
-                  ))}
-                </ul>
+                {geoError ? (
+                  <p>Error fetching location. Please enable location services to see nearby games.</p>
+                ) : (
+                  <ul className="space-y-4">
+                    {recentGames.map((game) => (
+                      <li key={game.id} className="border-b pb-4">
+                        <p className="font-bold">{new Date(game.endTime).toLocaleString()} - {game.location}</p>
+                        <p>Mode: {game.mode}</p>
+                        <p>Score: {game.blueScore} - {game.redScore}</p>
+                        <p>Distance: {game.distance} miles away</p>
+                        <p>Players: {game.players.map(p => p.name).join(', ')}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

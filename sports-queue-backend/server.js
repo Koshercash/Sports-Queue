@@ -8,6 +8,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import geolib from 'geolib';
 
 dotenv.config();
 
@@ -615,6 +616,87 @@ async function startServer() {
       res.status(500).json({ error: 'Failed to process game leave', details: error.message });
     }
   });
+
+  const GameResultSchema = new mongoose.Schema({
+    mode: String,
+    blueScore: Number,
+    redScore: Number,
+    players: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    endTime: Date,
+    location: String,
+    coordinates: {
+      type: { type: String, enum: ['Point'], required: true },
+      coordinates: { type: [Number], required: true }
+    }
+  });
+  
+  GameResultSchema.index({ coordinates: '2dsphere' });
+  
+  const GameResult = mongoose.model('GameResult', GameResultSchema);
+  
+  // ... (other code remains the same)
+  
+  app.post('/api/game/result', authMiddleware, async (req, res) => {
+    try {
+      const { mode, blueScore, redScore, players, endTime, location, coordinates } = req.body;
+      const gameResult = new GameResult({
+        mode,
+        blueScore,
+        redScore,
+        players: players.map(p => p.id),
+        endTime: new Date(endTime),
+        location,
+        coordinates: {
+          type: 'Point',
+          coordinates: [coordinates.longitude, coordinates.latitude]
+        }
+      });
+      await gameResult.save();
+      res.status(201).json({ message: 'Game result saved successfully' });
+    } catch (error) {
+      console.error('Error saving game result:', error);
+      res.status(500).json({ error: 'Failed to save game result' });
+    }
+  });
+  
+  app.get('/api/games/recent', authMiddleware, async (req, res) => {
+    try {
+      const { latitude, longitude } = req.query;
+      const userLocation = { latitude: parseFloat(latitude), longitude: parseFloat(longitude) };
+  
+      const recentGames = await GameResult.find({
+        coordinates: {
+          $near: {
+            $geometry: {
+              type: 'Point',
+              coordinates: [userLocation.longitude, userLocation.latitude]
+            },
+            $maxDistance: 80467 // 50 miles in meters
+          }
+        }
+      })
+        .sort({ endTime: -1 })
+        .limit(10)
+        .populate('players', 'name');
+  
+      const gamesWithDistance = recentGames.map(game => {
+        const distance = geolib.getDistance(
+          userLocation,
+          { latitude: game.coordinates.coordinates[1], longitude: game.coordinates.coordinates[0] }
+        );
+        return {
+          ...game.toObject(),
+          distance: Math.round(distance / 1609.34) // Convert meters to miles and round
+        };
+      });
+  
+      res.json(gamesWithDistance);
+    } catch (error) {
+      console.error('Error fetching recent games:', error);
+      res.status(500).json({ error: 'Failed to fetch recent games' });
+    }
+  });
+
   // Update the error handling middleware
   app.use((err, req, res, next) => {
     console.error(err.stack);

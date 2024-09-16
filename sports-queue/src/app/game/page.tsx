@@ -103,7 +103,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     setShowLeavePrompt(false);
     try {
       await onLeaveGame(gameState.gameStartTime);
-      // Clear the game state from local storage
+      // Clear the game state from localStorage
       localStorage.removeItem('gameState');
       // Reset the game state
       setGameState({
@@ -236,9 +236,13 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     // Save the current game state to localStorage before navigating
     localStorage.setItem('gameState', JSON.stringify({
       ...gameState,
-      isReturning: true // Add a flag to indicate we're returning from the game screen
+      isReturning: true,
+      match: {
+        team1: players.filter(p => p.team === 'blue'),
+        team2: players.filter(p => p.team === 'red')
+      }
     }));
-    onBackToMain(); // Call the onBackToMain prop instead of using router.push
+    onBackToMain();
   };
 
   const positionOrder = ['goalkeeper', 'defender', 'midfielder', 'striker'];
@@ -291,6 +295,40 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
+  const handleGameEnd = async () => {
+    // Update the game state to 'ended'
+    setGameState(prevState => ({
+      ...prevState,
+      gameState: 'ended',
+    }));
+
+    // Save the game result
+    try {
+      const token = localStorage.getItem('token');
+      const gameResult = {
+        mode: mode,
+        blueScore: gameState.blueScore,
+        redScore: gameState.redScore,
+        players: players,
+        endTime: new Date().toISOString(),
+        location: fieldLocation.name, // Assuming fieldLocation is available in this scope
+      };
+
+      await axios.post('http://localhost:3002/api/game/result', gameResult, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      // Clear the game state from localStorage
+      localStorage.removeItem('gameState');
+
+      // Call onBackToMain to return to the main screen
+      onBackToMain();
+    } catch (error) {
+      console.error('Failed to save game result:', error);
+      alert('Failed to save game result. The game has ended, but it may not appear in your recent games.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white text-black relative flex flex-col">
       <div className="absolute inset-0 flex">
@@ -300,16 +338,16 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
       <div className="relative z-10 p-4 flex-grow">
         <div className="flex items-center">
           <Button 
-            variant="outline" 
-            className="absolute top-4 left-4 bg-white text-green-500 hover:bg-green-50 h-10 px-3 text-sm flex items-center"
+            variant="default"
+            className="absolute top-4 left-4 bg-green-500 text-white hover:bg-green-600 h-10 px-3 text-sm flex items-center"
             onClick={handleBackClick}
           >
             <ArrowLeft className="h-4 w-4 mr-1" />
             <span>Back</span>
           </Button>
           <Button 
-            variant="outline" 
-            className="absolute top-4 right-4 bg-white h-10 px-4"
+            variant="default"
+            className="absolute top-4 right-4 bg-green-500 text-white hover:bg-green-600 h-10 px-4"
             onClick={handleLeaveGameClick}
           >
             {gameState.gameState === 'ended' ? 'Return to Main' : 'Leave Game'}
@@ -415,7 +453,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
                   </div>
                   <Button 
                     onClick={handleReportScore}
-                    className="mt-4 bg-green-500 hover:bg-green-600 text-white"
+                    className="mt-4 bg-green-500 text-white hover:bg-green-600"
                   >
                     Submit Score
                   </Button>
@@ -452,7 +490,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
             </div>
           ) : (
             <Button 
-              className="bg-gray-400 text-white text-3xl font-bold px-12 py-6 rounded-xl cursor-not-allowed"
+              className="bg-gray-400 text-white text-3xl font-bold px-12 py-6 rounded-xl cursor-not-allowed" 
               disabled
             >
               GAME IN PROGRESS
@@ -473,13 +511,13 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
         <div className="flex space-x-4 mt-4">
           <Button 
-            className="flex-1 bg-green-500 hover:bg-green-600 text-white" 
+            className="flex-1 bg-green-500 text-white hover:bg-green-600" 
             onClick={() => setShowChat(!showChat)}
           >
             {showChat ? 'Close Chat' : 'Open Chat'}
           </Button>
           <Button 
-            className="flex-1 bg-green-500 hover:bg-green-600 text-white" 
+            className="flex-1 bg-green-500 text-white hover:bg-green-600" 
             onClick={() => setShowPlayerList(!showPlayerList)}
           >
             {showPlayerList ? 'Close Player List' : 'Open Player List'}
@@ -513,7 +551,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
                     onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
                   />
                   <Button 
-                    className="bg-green-500 hover:bg-green-600 text-white"
+                    className="bg-green-500 text-white hover:bg-green-600"
                     onClick={handleSendMessage}
                   >
                     Send

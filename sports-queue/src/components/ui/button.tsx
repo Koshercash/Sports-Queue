@@ -1,20 +1,16 @@
-'use client';
-import * as React from 'react';
+import React from 'react';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  className?: string;
-  children: React.ReactNode;
-  onClick?: () => void;
   variant?: 'default' | 'outline' | 'link';
   size?: 'default' | 'sm' | 'lg';
 }
 
-export function Button({ className, children, onClick, variant = 'default', size = 'default', ...props }: ButtonProps) {
-  const baseStyles = 'font-medium rounded focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500';
+export const Button: React.FC<ButtonProps> = ({ children, variant = 'default', size = 'default', className, ...props }) => {
+  const baseStyles = 'rounded transition-colors duration-200';
   const variantStyles = {
     default: 'bg-green-500 text-white hover:bg-green-600',
-    outline: 'border border-green-500 text-green-500 hover:bg-green-50',
-    link: 'text-green-500 hover:underline'
+    outline: 'bg-transparent border border-green-500 text-green-500 hover:bg-green-50',
+    link: 'bg-transparent text-green-500 hover:underline'
   };
   const sizeStyles = {
     default: 'px-4 py-2',
@@ -22,13 +18,11 @@ export function Button({ className, children, onClick, variant = 'default', size
     lg: 'px-6 py-3 text-lg'
   };
 
+  const combinedClassName = `${baseStyles} ${variantStyles[variant]} ${sizeStyles[size]} ${className || ''}`;
+
   return (
-    <button
-      className={`${baseStyles} ${variantStyles[variant]} ${sizeStyles[size]} ${className}`}
-      onClick={onClick}
-      {...props}
-    >
+    <button {...props} className={combinedClassName}>
       {children}
     </button>
   );
-}
+};
