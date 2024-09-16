@@ -739,20 +739,28 @@ async function startServer() {
       })
         .sort({ endTime: -1 })
         .limit(10)
-        .populate('players', 'name');
+        .populate('players', 'name mmr5v5 mmr11v11');
   
-      const gamesWithDistance = recentGames.map(game => {
+      const gamesWithDistanceAndMMR = recentGames.map(game => {
         const distance = geolib.getDistance(
           userLocation,
           { latitude: game.coordinates.coordinates[1], longitude: game.coordinates.coordinates[0] }
         );
+
+        // Calculate average MMR
+        const totalMMR = game.players.reduce((sum, player) => {
+          return sum + (game.mode === '5v5' ? player.mmr5v5 : player.mmr11v11);
+        }, 0);
+        const averageMMR = Math.round(totalMMR / game.players.length);
+
         return {
           ...game.toObject(),
-          distance: Math.round(distance / 1609.34) // Convert meters to miles and round
+          distance: Math.round(distance / 1609.34), // Convert meters to miles and round
+          averageMMR
         };
       });
   
-      res.json(gamesWithDistance);
+      res.json(gamesWithDistanceAndMMR);
     } catch (error) {
       console.error('Error fetching recent games:', error);
       res.status(500).json({ error: 'Failed to fetch recent games' });

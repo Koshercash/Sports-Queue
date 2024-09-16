@@ -80,6 +80,7 @@ interface RecentGame {
   distance: number;
   players: { id: string; name: string; profilePicture?: string }[];
   mmrChange: number; // Added mmrChange property
+  averageMMR: number; // Added averageMMR property
 }
 
 interface Player {
@@ -497,7 +498,8 @@ export default function MainScreen() {
           { id: 'player5', name: 'Charlie Davis' },
         ],
         distance: 5,
-        mmrChange: 10 // Added mmrChange property
+        mmrChange: 10, // Added mmrChange property
+        averageMMR: 1500 // Added averageMMR property
       };
 
       setMatchHistory([sampleMatch, ...response.data]);
@@ -691,7 +693,20 @@ export default function MainScreen() {
             headers: { Authorization: `Bearer ${token}` },
             params: { latitude, longitude }
           });
-          setRecentGames(response.data);
+          
+          // Filter games to only include those within 50 miles
+          const nearbyGames = response.data.filter(game => game.distance <= 50);
+
+          // Combine nearby games with match history, removing duplicates
+          const allGames = [...nearbyGames, ...matchHistory];
+          const uniqueGames = allGames.filter((game, index, self) =>
+            index === self.findIndex((t) => t.id === game.id)
+          );
+          
+          // Sort by end time, most recent first
+          uniqueGames.sort((a, b) => new Date(b.endTime).getTime() - new Date(a.endTime).getTime());
+          
+          setRecentGames(uniqueGames);
         } catch (error) {
           console.error('Failed to fetch recent games:', error);
         }
@@ -699,7 +714,7 @@ export default function MainScreen() {
     };
 
     fetchRecentGames();
-  }, [latitude, longitude]);
+  }, [latitude, longitude, matchHistory]);
 
   useEffect(() => {
     fetchMatchHistory();
@@ -852,17 +867,49 @@ export default function MainScreen() {
                 {geoError ? (
                   <p>Error fetching location. Please enable location services to see nearby games.</p>
                 ) : (
-                  <ul className="space-y-4">
+                  <div className="space-y-6">
                     {recentGames.map((game) => (
-                      <li key={game.id} className="border-b pb-4">
-                        <p className="font-bold">{new Date(game.endTime).toLocaleString()} - {game.location}</p>
-                        <p>Mode: {game.mode}</p>
-                        <p>Score: {game.blueScore} - {game.redScore}</p>
-                        <p>Distance: {game.distance} miles away</p>
-                        <p>Players: {game.players.map(p => p.name).join(', ')}</p>
-                      </li>
+                      <Card key={game.id} className="overflow-hidden">
+                        <CardHeader className="bg-gray-100 pb-2">
+                          <CardTitle className="text-xl flex justify-between items-start">
+                            <span>{new Date(game.endTime).toLocaleString()}</span>
+                            <span className="text-sm font-semibold text-gray-600">
+                              Avg MMR: {game.averageMMR}
+                            </span>
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="pt-4">
+                          <div className="text-center mb-4">
+                            <p className="text-2xl font-semibold">{game.mode}</p>
+                          </div>
+                          <div className="flex justify-center items-center mb-4">
+                            <span className="text-5xl font-bold text-blue-600 mr-4">{game.blueScore}</span>
+                            <span className="text-5xl font-bold">-</span>
+                            <span className="text-5xl font-bold text-red-600 ml-4">{game.redScore}</span>
+                          </div>
+                          <p className="text-xl mb-4 text-center">{game.location}</p>
+                          {game.distance && (
+                            <p className="text-lg mb-4 text-center">{game.distance.toFixed(1)} miles away</p>
+                          )}
+                          <div>
+                            <p className="text-lg font-semibold mb-2">Players:</p>
+                            <div className="flex flex-wrap gap-4 justify-center">
+                              {game.players.map(player => (
+                                <div key={player.id} className="flex flex-col items-center">
+                                  <InteractableProfilePicture
+                                    currentImage={player.profilePicture || ''}
+                                    onClick={() => handlePlayerClick(player.id)}
+                                    size="small"
+                                  />
+                                  <span className="text-sm mt-1">{player.name}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
                     ))}
-                  </ul>
+                  </div>
                 )}
               </CardContent>
             </Card>

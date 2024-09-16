@@ -263,12 +263,14 @@ export default function LoginScreen() {
                 <Button className="w-full" onClick={handleSignUp}>Sign Up</Button>
               </div>
             )}
-            <Button 
-              className="w-full mt-4" 
-              onClick={() => setIsRegistering(false)}
-            >
-              Back to Login
-            </Button>
+            <div className="w-full max-w-md mt-4">
+              <Button 
+                className="w-full"
+                onClick={() => setIsRegistering(false)}
+              >
+                Back to Login
+              </Button>
+            </div>
           </>
         )}
       </div>
