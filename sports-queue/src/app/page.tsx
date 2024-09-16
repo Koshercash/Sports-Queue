@@ -1,18 +1,17 @@
 'use client';  // Add this line at the top of the file
 
-import React, { useState, ChangeEvent, useEffect } from 'react'
+import React, { useState, ChangeEvent } from 'react'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useRouter } from 'next/navigation';
 import axios from 'axios';
-import Image from 'next/image';
 import { InteractableProfilePicture } from '@/components/InteractableProfilePicture';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const [isRegistering, setIsRegistering] = useState(false);
   const [step, setStep] = useState(1)
   const [formData, setFormData] = useState({
     name: '',
@@ -25,12 +24,22 @@ export default function LoginScreen() {
     skillLevel: '',
     dateOfBirth: '',
     profilePicture: null as File | null,
+    cityTown: '',
   })
+
+  const [loginData, setLoginData] = useState({
+    email: '',
+    password: '',
+  });
 
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value })
+  }
+
+  const handleLoginInputChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setLoginData({ ...loginData, [e.target.name]: e.target.value })
   }
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -59,7 +68,7 @@ export default function LoginScreen() {
   const isStepValid = () => {
     switch (step) {
       case 1:
-        return formData.name && formData.email && formData.password && formData.phone && formData.dateOfBirth && isOver16(formData.dateOfBirth)
+        return formData.name && formData.email && formData.password && formData.phone && formData.dateOfBirth && formData.cityTown && isOver16(formData.dateOfBirth)
       case 2:
         return formData.idPicture
       case 3:
@@ -88,17 +97,6 @@ export default function LoginScreen() {
     return age >= 16;
   }
 
-  const getMMRFromSkillLevel = (skillLevel: string): number => {
-    switch (skillLevel) {
-      case 'beginner': return 300;
-      case 'average': return 600;
-      case 'intermediate': return 1000;
-      case 'advanced': return 1400;
-      case 'pro': return 1800;
-      default: return 300;
-    }
-  }
-
   const handleSignUp = async () => {
     if (isStepValid()) {
       if (!isOver16(formData.dateOfBirth)) {
@@ -118,6 +116,9 @@ export default function LoginScreen() {
           }
         });
 
+        // Explicitly add cityTown to ensure it's included
+        formDataToSend.append('cityTown', formData.cityTown);
+
         const response = await axios.post('http://localhost:3002/api/register', formDataToSend, {
           withCredentials: true,
           headers: { 'Content-Type': 'multipart/form-data' },
@@ -125,17 +126,6 @@ export default function LoginScreen() {
         if (response.data.token) {
           localStorage.setItem('token', response.data.token);
           axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
-          
-          // Send friend request to Alice immediately after successful registration
-          try {
-            const friendRequestResponse = await axios.post('http://localhost:3002/api/friends/send-dummy-request', {}, {
-              headers: { 'Authorization': `Bearer ${response.data.token}` }
-            });
-            console.log('Friend request sent:', friendRequestResponse.data.message);
-          } catch (friendRequestError) {
-            console.error('Error sending friend request:', friendRequestError);
-          }
-
           router.push('/main');
         }
       } catch (error) {
@@ -152,102 +142,134 @@ export default function LoginScreen() {
     }
   };
 
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const response = await axios.post('http://localhost:3002/api/login', loginData);
+      if (response.data.token) {
+        localStorage.setItem('token', response.data.token);
+        router.push('/main');
+      }
+    } catch (error) {
+      console.error('Login failed:', error);
+      alert('Login failed. Please check your credentials.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white relative overflow-hidden">
       <div className="absolute inset-0 border-8 border-green-500 animate-border-rotate"></div>
       <div className="relative z-10 flex flex-col items-center justify-center min-h-screen p-8">
         <h1 className="text-4xl font-bold text-green-500 mb-8">Sports Queue</h1>
-        {step === 1 && (
+        {!isRegistering ? (
           <div className="w-full max-w-md space-y-4">
-            <Input name="name" placeholder="Name" value={formData.name} onChange={handleInputChange} required />
-            <Input name="email" type="email" placeholder="Email" value={formData.email} onChange={handleInputChange} required />
-            <Input name="password" type="password" placeholder="Password" value={formData.password} onChange={handleInputChange} required />
-            <Input name="phone" type="tel" placeholder="Phone Number" value={formData.phone} onChange={handleInputChange} required />
-            <Input name="dateOfBirth" type="date" placeholder="Date of Birth" value={formData.dateOfBirth} onChange={handleInputChange} required />
-            <Button className="w-full" onClick={handleNext}>Next</Button>
+            <Input name="email" type="email" placeholder="Email" value={loginData.email} onChange={handleLoginInputChange} required />
+            <Input name="password" type="password" placeholder="Password" value={loginData.password} onChange={handleLoginInputChange} required />
+            <Button className="w-full" onClick={handleLogin}>Login</Button>
+            <Button className="w-full" onClick={() => setIsRegistering(true)}>Register</Button>
           </div>
-        )}
-        {step === 2 && (
-          <div className="w-full max-w-md space-y-4">
-            <Label>Upload ID Picture</Label>
-            <Input type="file" accept="image/*" onChange={handleFileChange} required />
-            <Button className="w-full" onClick={handleNext}>Next</Button>
-          </div>
-        )}
-        {step === 3 && (
-          <div className="w-full max-w-md space-y-4">
-            <Label>Sex</Label>
-            <div className="space-y-2">
-              <div className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  id="male"
-                  value="male"
-                  checked={formData.sex === 'male'}
-                  onChange={() => handleSexChange('male')}
-                />
-                <Label htmlFor="male">Male</Label>
+        ) : (
+          <>
+            {step === 1 && (
+              <div className="w-full max-w-md space-y-4">
+                <Input name="name" placeholder="Name" value={formData.name} onChange={handleInputChange} required />
+                <Input name="email" type="email" placeholder="Email" value={formData.email} onChange={handleInputChange} required />
+                <Input name="password" type="password" placeholder="Password" value={formData.password} onChange={handleInputChange} required />
+                <Input name="phone" type="tel" placeholder="Phone Number" value={formData.phone} onChange={handleInputChange} required />
+                <Input name="cityTown" placeholder="City/Town" value={formData.cityTown} onChange={handleInputChange} required />
+                <Input name="dateOfBirth" type="date" placeholder="Date of Birth" value={formData.dateOfBirth} onChange={handleInputChange} required />
+                <Button className="w-full" onClick={handleNext}>Next</Button>
               </div>
-              <div className="flex items-center space-x-2">
-                <input
-                  type="radio"
-                  id="female"
-                  value="female"
-                  checked={formData.sex === 'female'}
-                  onChange={() => handleSexChange('female')}
-                />
-                <Label htmlFor="female">Female</Label>
+            )}
+            {step === 2 && (
+              <div className="w-full max-w-md space-y-4">
+                <Label>Upload ID Picture</Label>
+                <Input type="file" accept="image/*" onChange={handleFileChange} required />
+                <Button className="w-full" onClick={handleNext}>Next</Button>
               </div>
-            </div>
-            <Button className="w-full" onClick={handleNext}>Next</Button>
-          </div>
-        )}
-        {step === 4 && (
-          <div className="w-full max-w-md space-y-4">
-            <Label>Preferred Position</Label>
-            <Select onValueChange={(value) => setFormData((prev) => ({ ...prev, position: value }))}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select position" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="goalkeeper">Goalkeeper</SelectItem>
-                <SelectItem value="fullback">Full Back</SelectItem>
-                <SelectItem value="centerback">Center Back</SelectItem>
-                <SelectItem value="winger">Winger</SelectItem>
-                <SelectItem value="midfielder">Midfielder</SelectItem>
-                <SelectItem value="striker">Striker</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button className="w-full" onClick={handleNext}>Next</Button>
-          </div>
-        )}
-        {step === 5 && (
-          <div className="w-full max-w-md space-y-4">
-            <Label>Skill Level</Label>
-            <Select onValueChange={(value) => setFormData((prev) => ({ ...prev, skillLevel: value }))}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select skill level" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="beginner">Beginner</SelectItem>
-                <SelectItem value="average">Average</SelectItem>
-                <SelectItem value="intermediate">Intermediate</SelectItem>
-                <SelectItem value="advanced">Advanced</SelectItem>
-                <SelectItem value="pro">Pro</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button className="w-full" onClick={handleNext}>Next</Button>
-          </div>
-        )}
-        {step === 6 && (
-          <div className="w-full max-w-md space-y-4">
-            <Label>Profile Picture (Optional)</Label>
-            <InteractableProfilePicture
-              currentImage={profilePicture}
-              onImageChange={handleProfilePictureChange}
-            />
-            <Button className="w-full" onClick={handleSignUp}>Sign Up</Button>
-          </div>
+            )}
+            {step === 3 && (
+              <div className="w-full max-w-md space-y-4">
+                <Label>Sex</Label>
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="radio"
+                      id="male"
+                      value="male"
+                      checked={formData.sex === 'male'}
+                      onChange={() => handleSexChange('male')}
+                    />
+                    <Label htmlFor="male">Male</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="radio"
+                      id="female"
+                      value="female"
+                      checked={formData.sex === 'female'}
+                      onChange={() => handleSexChange('female')}
+                    />
+                    <Label htmlFor="female">Female</Label>
+                  </div>
+                </div>
+                <Button className="w-full" onClick={handleNext}>Next</Button>
+              </div>
+            )}
+            {step === 4 && (
+              <div className="w-full max-w-md space-y-4">
+                <Label>Preferred Position</Label>
+                <Select onValueChange={(value) => setFormData((prev) => ({ ...prev, position: value }))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select position" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="goalkeeper">Goalkeeper</SelectItem>
+                    <SelectItem value="fullback">Full Back</SelectItem>
+                    <SelectItem value="centerback">Center Back</SelectItem>
+                    <SelectItem value="winger">Winger</SelectItem>
+                    <SelectItem value="midfielder">Midfielder</SelectItem>
+                    <SelectItem value="striker">Striker</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button className="w-full" onClick={handleNext}>Next</Button>
+              </div>
+            )}
+            {step === 5 && (
+              <div className="w-full max-w-md space-y-4">
+                <Label>Skill Level</Label>
+                <Select onValueChange={(value) => setFormData((prev) => ({ ...prev, skillLevel: value }))}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select skill level" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="beginner">Beginner</SelectItem>
+                    <SelectItem value="average">Average</SelectItem>
+                    <SelectItem value="intermediate">Intermediate</SelectItem>
+                    <SelectItem value="advanced">Advanced</SelectItem>
+                    <SelectItem value="pro">Pro</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button className="w-full" onClick={handleNext}>Next</Button>
+              </div>
+            )}
+            {step === 6 && (
+              <div className="w-full max-w-md space-y-4">
+                <Label>Profile Picture (Optional)</Label>
+                <InteractableProfilePicture
+                  currentImage={profilePicture}
+                  onImageChange={handleProfilePictureChange}
+                />
+                <Button className="w-full" onClick={handleSignUp}>Sign Up</Button>
+              </div>
+            )}
+            <Button 
+              className="w-full mt-4" 
+              onClick={() => setIsRegistering(false)}
+            >
+              Back to Login
+            </Button>
+          </>
         )}
       </div>
     </div>

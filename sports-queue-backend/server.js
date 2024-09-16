@@ -146,7 +146,7 @@ async function startServer() {
         mmr5v5: mmr,
         mmr11v11: mmr,
         dateOfBirth: dob,
-        cityTown, // Add this line
+        cityTown: Array.isArray(cityTown) ? cityTown[0] : cityTown, // Ensure cityTown is a string
         profilePicturePath: req.files.profilePicture ? req.files.profilePicture[0].filename : null,
         idPicture: req.files.idPicture ? req.files.idPicture[0].filename : null
       });
@@ -583,17 +583,25 @@ async function startServer() {
       const matches = await GameResult.find({ players: userId })
         .sort({ endTime: -1 })
         .limit(limit)
-        .populate('players', 'name');
+        .populate('players', 'name profilePicturePath');
   
-      const formattedMatches = matches.map(match => ({
-        id: match._id,
-        mode: match.mode,
-        blueScore: match.blueScore,
-        redScore: match.redScore,
-        location: match.location,
-        endTime: match.endTime,
-        players: match.players.map(player => ({ id: player._id, name: player.name }))
-      }));
+      const formattedMatches = matches.map(match => {
+        const userMmrChange = match.mmrChanges.find(change => change.userId.toString() === userId.toString());
+        return {
+          id: match._id,
+          mode: match.mode,
+          blueScore: match.blueScore,
+          redScore: match.redScore,
+          location: match.location,
+          endTime: match.endTime,
+          players: match.players.map(player => ({
+            id: player._id,
+            name: player.name,
+            profilePicture: player.profilePicturePath ? `/uploads/${player.profilePicturePath}` : null
+          })),
+          mmrChange: userMmrChange ? userMmrChange.change : 0
+        };
+      });
   
       res.json(formattedMatches);
     } catch (error) {
@@ -677,7 +685,11 @@ async function startServer() {
     coordinates: {
       type: { type: String, enum: ['Point'], required: true },
       coordinates: { type: [Number], required: true }
-    }
+    },
+    mmrChanges: [{
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+      change: Number
+    }]
   });
   
   GameResultSchema.index({ coordinates: '2dsphere' });
@@ -686,7 +698,7 @@ async function startServer() {
   
   app.post('/api/game/result', authMiddleware, async (req, res) => {
     try {
-      const { mode, blueScore, redScore, players, endTime, location, coordinates } = req.body;
+      const { mode, blueScore, redScore, players, endTime, location, coordinates, mmrChanges } = req.body;
       const gameResult = new GameResult({
         mode,
         blueScore,
@@ -697,7 +709,8 @@ async function startServer() {
         coordinates: coordinates ? {
           type: 'Point',
           coordinates: [coordinates.longitude, coordinates.latitude]
-        } : undefined
+        } : undefined,
+        mmrChanges
       });
       await gameResult.save();
       console.log('Game result saved:', gameResult);
@@ -852,5 +865,6 @@ async function startServer() {
   const PORT = process.env.PORT || 3002;
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 }
+
 
 startServer().catch(error => console.error('Failed to start server:', error));

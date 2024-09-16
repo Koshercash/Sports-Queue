@@ -78,7 +78,8 @@ interface RecentGame {
   location: string;
   endTime: string;
   distance: number;
-  players: { id: string; name: string }[];
+  players: { id: string; name: string; profilePicture?: string }[];
+  mmrChange: number; // Added mmrChange property
 }
 
 interface Player {
@@ -495,7 +496,8 @@ export default function MainScreen() {
           { id: 'player4', name: 'Alice Brown' },
           { id: 'player5', name: 'Charlie Davis' },
         ],
-        distance: 5
+        distance: 5,
+        mmrChange: 10 // Added mmrChange property
       };
 
       setMatchHistory([sampleMatch, ...response.data]);
