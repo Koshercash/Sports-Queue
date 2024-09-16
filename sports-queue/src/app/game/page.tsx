@@ -101,28 +101,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
   const handleConfirmLeave = async () => {
     setShowLeavePrompt(false);
-    try {
-      await onLeaveGame(gameState.gameStartTime);
-      // Clear the game state from localStorage
-      localStorage.removeItem('gameState');
-      // Reset the game state
-      setGameState({
-        gameState: 'lobby',
-        totalGameTime: 0,
-        gameTime: 0,
-        reportScoreTime: 0,
-        blueScore: 0,
-        redScore: 0,
-        halfTimeOccurred: false,
-        isReady: false,
-        readyCount: 0,
-        gameStartTime: null,
-      });
-      router.push('/main');
-    } catch (error) {
-      console.error('Error leaving game:', error);
-      alert('Failed to leave game. Please try again.');
-    }
+    onLeaveGame(gameState.gameStartTime);
   };
 
   const getPositionStyle = (position: string, team: 'blue' | 'red', index: number, totalPlayers: number) => {
@@ -233,10 +212,10 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   };
 
   const handleBackClick = () => {
+    console.log('Back button clicked');
     // Save the current game state to localStorage before navigating
-    localStorage.setItem('gameState', JSON.stringify({
-      ...gameState,
-      isReturning: true,
+    const gameStateToSave = {
+      gameState: gameState.gameState,
       match: {
         team1: players.filter(p => p.team === 'blue'),
         team2: players.filter(p => p.team === 'red')
@@ -244,8 +223,15 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
       mode: mode,
       players: players,
       currentUserId: currentUserId,
-      lobbyTime: lobbyTime
-    }));
+      lobbyTime: lobbyTime,
+      isReturning: true,
+      totalGameTime: gameState.totalGameTime,
+      blueScore: gameState.blueScore,
+      redScore: gameState.redScore,
+      halfTimeOccurred: gameState.halfTimeOccurred
+    };
+    console.log('Saving game state:', gameStateToSave);
+    localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
     onBackToMain();
   };
 
@@ -330,6 +316,9 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     } catch (error) {
       console.error('Failed to save game result:', error);
       alert('Failed to save game result. The game has ended, but it may not appear in your recent games.');
+      // Even if there's an error, we should still end the game
+      localStorage.removeItem('gameState');
+      onBackToMain();
     }
   };
 

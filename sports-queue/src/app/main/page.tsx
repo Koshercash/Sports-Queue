@@ -123,14 +123,48 @@ export default function MainScreen() {
   };
 
   const handleReturnToGame = () => {
+    console.log('Handling return to game');
     const savedGameState = localStorage.getItem('gameState');
     if (savedGameState) {
       const parsedGameState = JSON.parse(savedGameState);
+      console.log('Parsed game state:', parsedGameState);
       setInGame(true);
-      setGameState(parsedGameState.gameState);
+      setGameState('inGame');
       setMatch(parsedGameState.match);
       setGameMode(parsedGameState.mode);
       setIsGameInProgress(true);
+      setLobbyTime(parsedGameState.lobbyTime);
+      setQueueStatus('matched');
+      // Remove the isReturning flag from localStorage
+      localStorage.setItem('gameState', JSON.stringify({
+        ...parsedGameState,
+        isReturning: false
+      }));
+    } else {
+      console.log('No saved game state found');
+    }
+  };
+
+  const handleBackFromGame = () => {
+    console.log('Handling back from game');
+    const savedGameState = localStorage.getItem('gameState');
+    if (savedGameState) {
+      const parsedGameState = JSON.parse(savedGameState);
+      setInGame(false);
+      setIsGameInProgress(true); // Set this to true instead of false
+      setMatch(parsedGameState.match);
+      setGameMode(parsedGameState.mode);
+      setLobbyTime(parsedGameState.lobbyTime);
+      setQueueStatus('matched');
+      // Don't remove the game state from localStorage
+    } else {
+      // If there's no saved game state, reset everything
+      setInGame(false);
+      setIsGameInProgress(false);
+      setMatch(null);
+      setGameState('idle');
+      setQueueStatus('idle');
+      setLobbyTime(0);
     }
   };
 
@@ -178,19 +212,9 @@ export default function MainScreen() {
         console.error('Detailed error in joining queue:', error);
         if (axios.isAxiosError(error)) {
           console.error('Axios error details:', error.response?.data);
-          if (error.response?.status === 403) {
-            const penaltyEndTime = new Date(error.response.data.penaltyEndTime);
-            setIsPenalized(true);
-            setPenaltyEndTime(penaltyEndTime);
-            alert(`You are currently penalized and cannot join games until ${penaltyEndTime.toLocaleString()}`);
-          } else if (error.response?.status === 400) {
-            alert(error.response.data.error);
-          } else {
-            alert(`Failed to join queue: ${error.response?.data?.error || error.message}`);
-          }
+          alert(error.response?.data?.error || 'Failed to join queue. Please try again.');
         } else {
-          // Handle the case where error is of type unknown
-          alert(`Failed to join queue: ${error instanceof Error ? error.message : 'An unknown error occurred'}`);
+          alert('An unexpected error occurred. Please try again.');
         }
       }
     } else if (queueStatus === 'queuing') {
@@ -482,11 +506,12 @@ export default function MainScreen() {
       
       // Reset all game-related states
       setInGame(false);
+      setIsGameInProgress(false);
       setMatch(null);
       setQueueStatus('idle');
       setGameState('idle');
-      setIsGameInProgress(false);
       setLobbyTime(0);
+      localStorage.removeItem('gameState');
 
       if (response.data.penalized) {
         setIsPenalized(true);
@@ -496,20 +521,17 @@ export default function MainScreen() {
         setIsPenalized(false);
         setPenaltyEndTime(null);
       }
-
-      // Clear the game state from localStorage
-      localStorage.removeItem('gameState');
     } catch (error) {
       console.error('Detailed error in handleLeaveGame:', error);
       if (axios.isAxiosError(error)) {
         console.error('Axios error details:', error.response?.data);
       }
-      // Even if there's an error, we should reset the game state
+      // Even if there's an error, reset the game state
       setInGame(false);
+      setIsGameInProgress(false);
       setMatch(null);
       setQueueStatus('idle');
       setGameState('idle');
-      setIsGameInProgress(false);
       setLobbyTime(0);
       localStorage.removeItem('gameState');
       throw error;
@@ -625,14 +647,19 @@ export default function MainScreen() {
     const savedGameState = localStorage.getItem('gameState');
     if (savedGameState) {
       const parsedGameState = JSON.parse(savedGameState);
+      console.log('Initial load - Parsed game state:', parsedGameState);
       if (parsedGameState.gameState !== 'ended' && parsedGameState.match) {
         setIsGameInProgress(true);
         setGameMode(parsedGameState.mode);
         setMatch(parsedGameState.match);
+        setLobbyTime(parsedGameState.lobbyTime);
+        setQueueStatus('matched');
       } else {
-        // Clear the game state if it's ended or invalid
+        console.log('Clearing invalid game state');
         localStorage.removeItem('gameState');
       }
+    } else {
+      console.log('No saved game state found on initial load');
     }
   }, []);
 
@@ -649,7 +676,7 @@ export default function MainScreen() {
           profilePicture: player.profilePicture || null
         }))}
         currentUserId={userProfile?.id || ''}
-        onBackToMain={() => handleLeaveGame(null)}
+        onBackToMain={handleBackFromGame}
         onLeaveGame={handleLeaveGame}
         lobbyTime={lobbyTime}
       />

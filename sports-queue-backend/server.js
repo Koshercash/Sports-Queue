@@ -410,7 +410,7 @@ async function startServer() {
           penaltyEndTime
         });
       }
-  
+
       // Check if user is already in a game
       const activeGame = await Game.findOne({ 
         players: req.userId,
@@ -419,6 +419,17 @@ async function startServer() {
 
       if (activeGame) {
         return res.status(400).json({ error: 'You are already in a game' });
+      }
+
+      // Check if there's an ongoing game that the user was part of
+      const recentGame = await Game.findOne({
+        players: req.userId,
+        status: 'inProgress',
+        startTime: { $gt: new Date(Date.now() - 2 * 60 * 60 * 1000) } // Games started within the last 2 hours
+      });
+
+      if (recentGame) {
+        return res.status(400).json({ error: 'You cannot rejoin a game in progress that you have left' });
       }
 
       const user = await User.findById(req.userId);
@@ -444,15 +455,8 @@ async function startServer() {
   app.post('/api/queue/leave', authMiddleware, async (req, res) => {
     try {
       const { gameMode } = req.body;
-      console.log(`User ${req.userId} attempting to leave ${gameMode} queue`);
-      const result = await Queue.findOneAndDelete({ userId: req.userId, gameMode });
-      if (result) {
-        console.log(`User ${req.userId} successfully left ${gameMode} queue`);
-        res.json({ message: 'Left queue successfully' });
-      } else {
-        console.log(`No queue entry found for user ${req.userId} in ${gameMode} queue`);
-        res.status(404).json({ message: 'No queue entry found' });
-      }
+      await Queue.deleteOne({ userId: req.userId, gameMode });
+      res.json({ message: 'Left queue successfully' });
     } catch (error) {
       console.error('Error leaving queue:', error);
       res.status(500).json({ error: 'Failed to leave queue' });
@@ -585,8 +589,10 @@ async function startServer() {
     try {
       const { lobbyTime, gameStartTime } = req.body;
       const now = new Date();
-      const gameStart = new Date(gameStartTime);
-      const timeDifference = (gameStart.getTime() - now.getTime()) / (1000 * 60); // difference in minutes
+      const gameStart = gameStartTime ? new Date(gameStartTime) : now;
+      const timeDifference = (now.getTime() - gameStart.getTime()) / (1000 * 60); // difference in minutes
+  
+      console.log('Leave game request:', { lobbyTime, gameStartTime, timeDifference });
   
       if (lobbyTime >= 8 && timeDifference <= 20) {
         let penalty = await Penalty.findOne({ userId: req.userId });
@@ -597,11 +603,15 @@ async function startServer() {
         penalty.leaveCount += 1;
         penalty.lastLeavePenaltyDate = now;
   
+        console.log('Updated penalty:', penalty);
+  
         if (penalty.leaveCount >= 3) {
           penalty.penaltyEndTime = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
         }
   
         await penalty.save();
+  
+        console.log('Penalty saved:', penalty);
   
         res.json({ 
           message: 'Game left successfully', 
