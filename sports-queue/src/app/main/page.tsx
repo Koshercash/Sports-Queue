@@ -29,6 +29,7 @@ interface UserProfile {
   mmr5v5: number;
   mmr11v11: number;
   bio: string;
+  cityTown: string; // Added cityTown property
 }
 
 interface Friend {
@@ -60,6 +61,7 @@ interface UserProfileData {
   mmr5v5: number;
   mmr11v11: number;
   bio: string;
+  cityTown: string; // Added cityTown property
 }
 
 interface PendingRequest {
@@ -274,12 +276,13 @@ export default function MainScreen() {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      // Ensure the profilePicture URL is complete
+      // Ensure the profilePicture URL is complete and add cityTown
       const userData = {
         ...response.data,
         profilePicture: response.data.profilePicture
           ? `http://localhost:3002${response.data.profilePicture}`
-          : null
+          : null,
+        cityTown: response.data.cityTown || ''
       };
       
       if (userId) {
@@ -465,11 +468,17 @@ export default function MainScreen() {
   const fetchMatchHistory = async () => {
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No token found');
+        return;
+      }
+      console.log('Fetching match history...');
       const response = await axios.get<RecentGame[]>('http://localhost:3002/api/user/match-history', {
         headers: { Authorization: `Bearer ${token}` },
-        params: { limit: 5 } // Fetch at least 5 recent games
+        params: { limit: 5 }
       });
       console.log('Fetched match history:', response.data);
+      setMatchHistory(response.data);
 
       // Add a sample match to the match history
       const sampleMatch: RecentGame = {
@@ -714,6 +723,10 @@ export default function MainScreen() {
     }
   }, []);
 
+  const handlePlayerClick = (playerId: string) => {
+    fetchUserProfile(playerId);
+  };
+
   // Render the GameScreen component if inGame is true
   if (inGame && match) {
     return (
@@ -819,7 +832,7 @@ export default function MainScreen() {
                         />
                       </TabsContent>
                       <TabsContent value="matchHistory">
-                        <MatchHistory matches={matchHistory} />
+                        <MatchHistory matches={matchHistory} currentUserId={userProfile?.id || ''} onPlayerClick={handlePlayerClick} />
                       </TabsContent>
                     </Tabs>
                   </>

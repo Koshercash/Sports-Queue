@@ -8,13 +8,17 @@ interface InteractableProfilePictureProps {
   priority?: boolean;
   isFriend?: boolean;
   onRemoveFriend?: () => void;
+  size?: 'small' | 'medium' | 'large' | 'custom';
+  customSize?: string;
 }
 
 export const InteractableProfilePicture: React.FC<InteractableProfilePictureProps> = ({
   currentImage,
   onImageChange,
   onClick,
-  priority = false
+  priority = false,
+  size = 'medium',
+  customSize,
 }) => {
   console.log('InteractableProfilePicture received image:', currentImage);
 
@@ -35,8 +39,18 @@ export const InteractableProfilePicture: React.FC<InteractableProfilePictureProp
     }
   };
 
+  const sizeClasses = {
+    small: 'w-10 h-10',
+    medium: 'w-16 h-16',
+    large: 'w-32 h-32',
+    custom: customSize || 'w-32 h-32', // Default to large if no custom size provided
+  };
+
   return (
-    <div className="relative w-20 h-20 rounded-full overflow-hidden cursor-pointer" onClick={handleClick}>
+    <div 
+      className={`${sizeClasses[size]} rounded-full overflow-hidden cursor-pointer relative`} 
+      onClick={handleClick}
+    >
       {currentImage ? (
         <Image
           src={currentImage}
@@ -47,7 +61,7 @@ export const InteractableProfilePicture: React.FC<InteractableProfilePictureProp
         />
       ) : (
         <div className="w-full h-full bg-gray-300 flex items-center justify-center">
-          <span className="text-gray-500">No Image</span>
+          <span className="text-gray-500 text-sm">No Image</span>
         </div>
       )}
       {onImageChange && (

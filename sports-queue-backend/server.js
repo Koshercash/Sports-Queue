@@ -47,7 +47,8 @@ async function startServer() {
     idPicture: String,
     dateOfBirth: Date,
     profilePicturePath: String,
-    bio: { type: String, default: '' }, // Add this line
+    bio: { type: String, default: '' },
+    cityTown: String, // Add this line
   });
 
   const User = mongoose.model('User', UserSchema);
@@ -101,10 +102,10 @@ async function startServer() {
     { name: 'idPicture', maxCount: 1 }
   ]), async (req, res) => {
     try {
-      const { name, email, password, phone, sex, position, skillLevel, dateOfBirth } = req.body;
+      const { name, email, password, phone, sex, position, skillLevel, dateOfBirth, cityTown } = req.body; // Add cityTown here
       
       // Log received data for debugging
-      console.log('Received registration data:', { name, email, phone, sex, position, skillLevel, dateOfBirth });
+      console.log('Received registration data:', { name, email, phone, sex, position, skillLevel, dateOfBirth, cityTown });
       console.log('Files:', req.files);
 
       // Check if user is over 16
@@ -122,7 +123,7 @@ async function startServer() {
       }
 
       // Check if all required fields are present
-      if (!name || !email || !password || !phone || !sex || !position || !skillLevel || !dateOfBirth) {
+      if (!name || !email || !password || !phone || !sex || !position || !skillLevel || !dateOfBirth || !cityTown) {
         return res.status(400).json({ error: 'All fields are required.' });
       }
 
@@ -145,6 +146,7 @@ async function startServer() {
         mmr5v5: mmr,
         mmr11v11: mmr,
         dateOfBirth: dob,
+        cityTown, // Add this line
         profilePicturePath: req.files.profilePicture ? req.files.profilePicture[0].filename : null,
         idPicture: req.files.idPicture ? req.files.idPicture[0].filename : null
       });
@@ -204,7 +206,8 @@ async function startServer() {
         profilePicture: user.profilePicturePath ? `/uploads/${user.profilePicturePath}` : null,
         mmr5v5: user.mmr5v5,
         mmr11v11: user.mmr11v11,
-        bio: user.bio, // Add this line
+        bio: user.bio,
+        cityTown: user.cityTown, // Add this line
       });
     } catch (error) {
       console.error('Error fetching user profile:', error);
@@ -529,6 +532,11 @@ async function startServer() {
         return res.status(400).json({ error: 'User ID is required' });
       }
 
+      // Check if the ID is 'match-history' and handle it separately
+      if (userId === 'match-history') {
+        return handleMatchHistory(req, res);
+      }
+
       const user = await User.findById(userId);
       
       if (!user) {
@@ -551,7 +559,8 @@ async function startServer() {
         isCurrentUser: isCurrentUser,
         mmr5v5: user.mmr5v5,
         mmr11v11: user.mmr11v11,
-        bio: user.bio, // Add this line
+        bio: user.bio,
+        cityTown: user.cityTown, // Add this line
       };
 
       console.log('Sending user data:', userData);
@@ -561,6 +570,37 @@ async function startServer() {
       res.status(500).json({ error: 'Internal server error', details: error.message });
     }
   });
+  
+  // Add this new route for match history
+  app.get('/api/user/match-history', authMiddleware, handleMatchHistory);
+
+  async function handleMatchHistory(req, res) {
+    try {
+      const userId = req.userId; // Use the authenticated user's ID
+      const limit = parseInt(req.query.limit) || 5;
+      console.log(`Fetching match history for user ${userId}, limit: ${limit}`);
+      
+      const matches = await GameResult.find({ players: userId })
+        .sort({ endTime: -1 })
+        .limit(limit)
+        .populate('players', 'name');
+  
+      const formattedMatches = matches.map(match => ({
+        id: match._id,
+        mode: match.mode,
+        blueScore: match.blueScore,
+        redScore: match.redScore,
+        location: match.location,
+        endTime: match.endTime,
+        players: match.players.map(player => ({ id: player._id, name: player.name }))
+      }));
+  
+      res.json(formattedMatches);
+    } catch (error) {
+      console.error('Error fetching match history:', error);
+      res.status(500).json({ error: 'Failed to fetch match history' });
+    }
+  }
 
   // Update profile picture
   app.post('/api/user/profile-picture', authMiddleware, upload.single('profilePicture'), async (req, res) => {
@@ -651,13 +691,13 @@ async function startServer() {
         mode,
         blueScore,
         redScore,
-        players: players.map(p => p.id),
+        players,
         endTime: new Date(endTime),
         location,
-        coordinates: {
+        coordinates: coordinates ? {
           type: 'Point',
           coordinates: [coordinates.longitude, coordinates.latitude]
-        }
+        } : undefined
       });
       await gameResult.save();
       console.log('Game result saved:', gameResult);
@@ -786,6 +826,7 @@ async function startServer() {
   app.get('/api/user/match-history', authMiddleware, async (req, res) => {
     try {
       const limit = parseInt(req.query.limit) || 5;
+      console.log(`Fetching match history for user ${req.userId}, limit: ${limit}`);
       const matches = await GameResult.find({ players: req.userId })
         .sort({ endTime: -1 })
         .limit(limit)

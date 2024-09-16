@@ -40,6 +40,7 @@ interface UserProfileData {
   mmr5v5: number;
   mmr11v11: number;
   bio: string;
+  cityTown: string; // Added cityTown property
 }
 
 export default function GameScreen({ mode = '5v5', players, currentUserId, onBackToMain, onLeaveGame, lobbyTime: initialLobbyTime }: GameScreenProps) {
@@ -229,7 +230,8 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
           ? response.data.profilePicture.startsWith('http')
             ? response.data.profilePicture
             : `http://localhost:3002${response.data.profilePicture}`
-          : null
+          : null,
+        cityTown: response.data.cityTown || '' // Added cityTown property
       };
       setSelectedProfile(profileData);
     } catch (error) {
@@ -650,6 +652,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
               onProfilePictureChange={undefined}
               onBioChange={undefined}
               isEditable={false}
+              cityTown={selectedProfile.cityTown}
             />
             <div className="flex justify-between mt-4">
               <Button onClick={() => setSelectedProfile(null)}>Close</Button>
