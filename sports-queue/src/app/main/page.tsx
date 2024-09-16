@@ -79,6 +79,14 @@ interface RecentGame {
   players: { id: string; name: string }[];
 }
 
+interface Player {
+  id: string;
+  name: string;
+  position: string;
+  team: 'blue' | 'red';
+  profilePicture?: string | null;
+}
+
 export default function MainScreen() {
   const [gameMode, setGameMode] = useState<'5v5' | '11v11'>('5v5')
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
@@ -112,6 +120,7 @@ export default function MainScreen() {
   const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
   const { latitude, longitude, error: geoError } = useGeolocation();
   const [matchHistory, setMatchHistory] = useState<RecentGame[]>([]);
+  const [shouldRefreshMatchHistory, setShouldRefreshMatchHistory] = useState(false);
 
   const totalNotifications = pendingRequests.length + newMessages;
 
@@ -122,49 +131,60 @@ export default function MainScreen() {
     }
   };
 
-  const handleReturnToGame = () => {
-    console.log('Handling return to game');
-    const savedGameState = localStorage.getItem('gameState');
-    if (savedGameState) {
-      const parsedGameState = JSON.parse(savedGameState);
-      console.log('Parsed game state:', parsedGameState);
-      setInGame(true);
-      setGameState('inGame');
-      setMatch(parsedGameState.match);
-      setGameMode(parsedGameState.mode);
-      setIsGameInProgress(true);
-      setLobbyTime(parsedGameState.lobbyTime);
-      setQueueStatus('matched');
-      // Remove the isReturning flag from localStorage
-      localStorage.setItem('gameState', JSON.stringify({
-        ...parsedGameState,
-        isReturning: false
-      }));
-    } else {
-      console.log('No saved game state found');
-    }
-  };
-
-  const handleBackFromGame = () => {
+  const handleBackFromGame = (gameJustEnded = false) => {
     console.log('Handling back from game');
-    const savedGameState = localStorage.getItem('gameState');
-    if (savedGameState) {
-      const parsedGameState = JSON.parse(savedGameState);
-      setInGame(false);
-      setIsGameInProgress(true); // Set this to true instead of false
-      setMatch(parsedGameState.match);
-      setGameMode(parsedGameState.mode);
-      setLobbyTime(parsedGameState.lobbyTime);
-      setQueueStatus('matched');
-      // Don't remove the game state from localStorage
-    } else {
-      // If there's no saved game state, reset everything
+    if (gameJustEnded) {
+      // If the game just ended, reset everything
       setInGame(false);
       setIsGameInProgress(false);
       setMatch(null);
       setGameState('idle');
       setQueueStatus('idle');
       setLobbyTime(0);
+      localStorage.removeItem('gameState');
+      setShouldRefreshMatchHistory(true);
+    } else {
+      // If just using the back button, preserve the game state
+      const savedGameState = localStorage.getItem('gameState');
+      if (savedGameState) {
+        const parsedGameState = JSON.parse(savedGameState);
+        setInGame(false);
+        setIsGameInProgress(true);
+        setMatch(parsedGameState.match);
+        setGameMode(parsedGameState.mode);
+        setLobbyTime(parsedGameState.lobbyTime);
+        setQueueStatus('matched');
+      }
+    }
+  };
+
+  const handleReturnToGame = () => {
+    console.log('Handling return to game');
+    const savedGameState = localStorage.getItem('gameState');
+    if (savedGameState) {
+      const parsedGameState = JSON.parse(savedGameState);
+      console.log('Parsed game state:', parsedGameState);
+      if (parsedGameState.isReturning) {
+        setInGame(true);
+        setGameState(parsedGameState.gameState);
+        setMatch({
+          team1: parsedGameState.players.filter((p: Player) => p.team === 'blue'),
+          team2: parsedGameState.players.filter((p: Player) => p.team === 'red')
+        });
+        setGameMode(parsedGameState.mode);
+        setIsGameInProgress(true);
+        setLobbyTime(parsedGameState.lobbyTime || 0);
+        setQueueStatus('matched');
+        // Remove the isReturning flag
+        localStorage.setItem('gameState', JSON.stringify({
+          ...parsedGameState,
+          isReturning: false
+        }));
+      } else {
+        console.log('No game to return to');
+      }
+    } else {
+      console.log('No saved game state found');
     }
   };
 
@@ -199,10 +219,13 @@ export default function MainScreen() {
             setGameState('inGame');
             setInGame(true);
             setIsGameInProgress(true);
-            // Save the game state to localStorage
+            setLobbyTime(0); // Reset lobby time for new game
             localStorage.setItem('gameState', JSON.stringify({
               gameState: 'inGame',
-              match: response.data.match
+              match: response.data.match,
+              mode: gameMode,
+              lobbyTime: 0,
+              gameEnded: false
             }));
           }, 3000);
         } else {
@@ -218,6 +241,7 @@ export default function MainScreen() {
         }
       }
     } else if (queueStatus === 'queuing') {
+      // Logic to leave the queue
       try {
         const token = localStorage.getItem('token');
         await axios.post('http://localhost:3002/api/queue/leave', 
@@ -225,7 +249,7 @@ export default function MainScreen() {
           { headers: { Authorization: `Bearer ${token}` } }
         );
         setQueueStatus('idle');
-        setDots(''); // Reset dots when leaving queue
+        setDots('');
       } catch (error) {
         console.error('Failed to leave queue:', error);
         alert('Failed to leave queue. Please try again.');
@@ -436,10 +460,12 @@ export default function MainScreen() {
     try {
       const token = localStorage.getItem('token');
       const response = await axios.get<RecentGame[]>('http://localhost:3002/api/user/match-history', {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        params: { limit: 5 } // Fetch at least 5 recent games
       });
       console.log('Fetched match history:', response.data);
       setMatchHistory(response.data);
+      setShouldRefreshMatchHistory(false);
     } catch (error) {
       console.error('Failed to fetch match history:', error);
     }
@@ -526,7 +552,8 @@ export default function MainScreen() {
       if (axios.isAxiosError(error)) {
         console.error('Axios error details:', error.response?.data);
       }
-      // Even if there's an error, reset the game state
+    } finally {
+      // Always reset these states, even if there's an error
       setInGame(false);
       setIsGameInProgress(false);
       setMatch(null);
@@ -534,7 +561,6 @@ export default function MainScreen() {
       setGameState('idle');
       setLobbyTime(0);
       localStorage.removeItem('gameState');
-      throw error;
     }
   };
 
@@ -641,7 +667,7 @@ export default function MainScreen() {
 
   useEffect(() => {
     fetchMatchHistory();
-  }, []);
+  }, [shouldRefreshMatchHistory]);
 
   useEffect(() => {
     const savedGameState = localStorage.getItem('gameState');

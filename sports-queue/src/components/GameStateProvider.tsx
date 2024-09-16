@@ -13,6 +13,7 @@ interface GameState {
   isReady: boolean;
   readyCount: number;
   gameStartTime: Date | null; // Add this line
+  lobbyTime: number; // Add this line
 }
 
 interface GameStateContextType {
@@ -42,6 +43,7 @@ export const GameStateProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     isReady: false,
     readyCount: 0,
     gameStartTime: null, // Add this line
+    lobbyTime: 0, // Add this line
   });
 
   useEffect(() => {

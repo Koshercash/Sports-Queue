@@ -1,48 +1,41 @@
 import React from 'react';
-import { useRouter } from 'next/navigation';
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
-interface Match {
+interface MatchHistoryProps {
+  matches: RecentGame[];
+}
+
+interface RecentGame {
   id: string;
   mode: '5v5' | '11v11';
   blueScore: number;
   redScore: number;
   location: string;
   endTime: string;
+  players: { id: string; name: string }[];
 }
 
-interface MatchHistoryProps {
-  matches: Match[];
-}
-
-const MatchHistory: React.FC<MatchHistoryProps> = ({ matches }) => {
-  const router = useRouter();
-
-  const handleMatchClick = (matchId: string) => {
-    console.log('Navigating to match result:', matchId);
-    router.push(`/match-result/${matchId}`);
-  };
-
+export default function MatchHistory({ matches }: MatchHistoryProps) {
   return (
     <div className="space-y-4">
-      {matches.map((match) => (
-        <div 
-          key={match.id} 
-          className="cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => handleMatchClick(match.id)}
-        >
-          <Card>
-            <CardContent className="p-4">
-              <p className="font-bold">{new Date(match.endTime).toLocaleString()}</p>
-              <p>Mode: {match.mode}</p>
-              <p>Score: {match.blueScore} - {match.redScore}</p>
+      {matches.length === 0 ? (
+        <p>No recent matches found.</p>
+      ) : (
+        matches.map((match) => (
+          <Card key={match.id}>
+            <CardHeader>
+              <CardTitle>{match.mode} Match - {new Date(match.endTime).toLocaleString()}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-lg font-semibold">
+                Score: <span className="text-blue-600">{match.blueScore}</span> - <span className="text-red-600">{match.redScore}</span>
+              </p>
               <p>Location: {match.location}</p>
+              <p>Players: {match.players.map(p => p.name).join(', ')}</p>
             </CardContent>
           </Card>
-        </div>
-      ))}
+        ))
+      )}
     </div>
   );
-};
-
-export default MatchHistory;
+}

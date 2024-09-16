@@ -439,12 +439,12 @@ async function startServer() {
       });
       await newQueueEntry.save();
       
-      // Always create a match (for testing purposes)
+      // Create a match if there are enough players in the queue
       const match = await createMatch(gameMode, user);
       if (match) {
         res.json({ message: 'Match found', match });
       } else {
-        res.status(500).json({ error: 'Failed to create match' });
+        res.status(200).json({ message: 'Joined queue successfully' });
       }
     } catch (error) {
       console.error('Error joining queue:', error);
@@ -644,8 +644,6 @@ async function startServer() {
   
   const GameResult = mongoose.model('GameResult', GameResultSchema);
   
-  // ... (other code remains the same)
-  
   app.post('/api/game/result', authMiddleware, async (req, res) => {
     try {
       const { mode, blueScore, redScore, players, endTime, location, coordinates } = req.body;
@@ -662,6 +660,7 @@ async function startServer() {
         }
       });
       await gameResult.save();
+      console.log('Game result saved:', gameResult);
       res.status(201).json({ message: 'Game result saved successfully' });
     } catch (error) {
       console.error('Error saving game result:', error);
@@ -783,6 +782,31 @@ async function startServer() {
   // Call these functions after connecting to the database
   await createSampleUsers();
   await createDummyPlayers();
+
+  app.get('/api/user/match-history', authMiddleware, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 5;
+      const matches = await GameResult.find({ players: req.userId })
+        .sort({ endTime: -1 })
+        .limit(limit)
+        .populate('players', 'name');
+
+      const formattedMatches = matches.map(match => ({
+        id: match._id,
+        mode: match.mode,
+        blueScore: match.blueScore,
+        redScore: match.redScore,
+        location: match.location,
+        endTime: match.endTime,
+        players: match.players.map(player => ({ id: player._id, name: player.name }))
+      }));
+
+      res.json(formattedMatches);
+    } catch (error) {
+      console.error('Error fetching match history:', error);
+      res.status(500).json({ error: 'Failed to fetch match history' });
+    }
+  });
 
   const PORT = process.env.PORT || 3002;
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

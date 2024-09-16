@@ -24,7 +24,7 @@ interface GameScreenProps {
   mode: '5v5' | '11v11';
   players: Player[];
   currentUserId: string;
-  onBackToMain: () => void;
+  onBackToMain: (gameJustEnded?: boolean) => void;
   onLeaveGame: (gameStartTime: Date | null) => Promise<void>;
   lobbyTime: number;
 }
@@ -42,7 +42,7 @@ interface UserProfileData {
   bio: string;
 }
 
-export default function GameScreen({ mode = '5v5', players, currentUserId, onBackToMain, onLeaveGame, lobbyTime }: GameScreenProps) {
+export default function GameScreen({ mode = '5v5', players, currentUserId, onBackToMain, onLeaveGame, lobbyTime: initialLobbyTime }: GameScreenProps) {
   const router = useRouter();
   const { gameState, setGameState } = useGameState();
   const [showChat, setShowChat] = useState(false)
@@ -58,14 +58,46 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     const savedGameState = localStorage.getItem('gameState');
     if (savedGameState) {
       const parsedGameState = JSON.parse(savedGameState);
-      setGameState(parsedGameState);
+      setGameState({
+        ...parsedGameState,
+        lobbyTime: initialLobbyTime,
+      });
     }
+
+    // Start the lobby timer
+    const timer = setInterval(() => {
+      setGameState(prevState => ({
+        ...prevState,
+        lobbyTime: (prevState.lobbyTime || 0) + 1
+      }));
+    }, 1000);
+
+    // Clear the timer when the component unmounts
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
     // Save game state to localStorage whenever it changes
-    localStorage.setItem('gameState', JSON.stringify(gameState));
-  }, [gameState]);
+    localStorage.setItem('gameState', JSON.stringify({
+      ...gameState,
+      mode,
+      players
+    }));
+  }, [gameState, mode, players]);
+
+  const handleBackClick = () => {
+    console.log('Back button clicked');
+    // Save the current state before going back
+    const gameStateToSave = {
+      ...gameState,
+      mode,
+      players,
+      isReturning: true
+    };
+    console.log('Saving game state:', gameStateToSave);
+    localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
+    onBackToMain();
+  };
 
   const handleLeaveGameClick = () => {
     if (gameState.gameState === 'ended') {
@@ -82,16 +114,17 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         isReady: false,
         readyCount: 0,
         gameStartTime: null,
+        lobbyTime: 0,
       });
-      onBackToMain();
+      onBackToMain(true); // Pass true to indicate the game has ended
       return;
     }
 
     const now = new Date();
-    const timeDifference = gameState.gameStartTime ? (gameState.gameStartTime.getTime() - now.getTime()) / (1000 * 60) : 0;
+    const timeDifference = gameState.gameStartTime ? (now.getTime() - gameState.gameStartTime.getTime()) / (1000 * 60) : 0;
     
     let warningMessage = '';
-    if (lobbyTime >= 8 && timeDifference <= 20 && gameState.gameState !== 'ended') {
+    if (gameState.lobbyTime >= 8 && timeDifference <= 20 && gameState.gameState !== 'ended') {
       warningMessage = 'Warning: Leaving the game now may result in a penalty.';
     }
 
@@ -101,7 +134,23 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
   const handleConfirmLeave = async () => {
     setShowLeavePrompt(false);
-    onLeaveGame(gameState.gameStartTime);
+    await onLeaveGame(gameState.gameStartTime);
+    // Clear local game state
+    localStorage.removeItem('gameState');
+    setGameState({
+      gameState: 'lobby',
+      totalGameTime: 0,
+      gameTime: 0,
+      reportScoreTime: 0,
+      blueScore: 0,
+      redScore: 0,
+      halfTimeOccurred: false,
+      isReady: false,
+      readyCount: 0,
+      gameStartTime: null,
+      lobbyTime: 0,
+    });
+    onBackToMain(true); // Pass true to indicate we're leaving the game
   };
 
   const getPositionStyle = (position: string, team: 'blue' | 'red', index: number, totalPlayers: number) => {
@@ -211,30 +260,6 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     return null;
   };
 
-  const handleBackClick = () => {
-    console.log('Back button clicked');
-    // Save the current game state to localStorage before navigating
-    const gameStateToSave = {
-      gameState: gameState.gameState,
-      match: {
-        team1: players.filter(p => p.team === 'blue'),
-        team2: players.filter(p => p.team === 'red')
-      },
-      mode: mode,
-      players: players,
-      currentUserId: currentUserId,
-      lobbyTime: lobbyTime,
-      isReturning: true,
-      totalGameTime: gameState.totalGameTime,
-      blueScore: gameState.blueScore,
-      redScore: gameState.redScore,
-      halfTimeOccurred: gameState.halfTimeOccurred
-    };
-    console.log('Saving game state:', gameStateToSave);
-    localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
-    onBackToMain();
-  };
-
   const positionOrder = ['goalkeeper', 'defender', 'midfielder', 'striker'];
   const sortedPlayers = players.sort((a, b) => 
     positionOrder.indexOf(a.position) - positionOrder.indexOf(b.position)
@@ -299,26 +324,27 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         mode: mode,
         blueScore: gameState.blueScore,
         redScore: gameState.redScore,
-        players: players,
+        players: players.map(p => p.id),
         endTime: new Date().toISOString(),
-        location: fieldLocation.name, // Assuming fieldLocation is available in this scope
+        location: fieldLocation.name,
       };
 
       await axios.post('http://localhost:3002/api/game/result', gameResult, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      // Clear the game state from localStorage
-      localStorage.removeItem('gameState');
+      // Set the gameEnded flag in localStorage
+      localStorage.setItem('gameState', JSON.stringify({
+        ...JSON.parse(localStorage.getItem('gameState') || '{}'),
+        gameEnded: true
+      }));
 
       // Call onBackToMain to return to the main screen
-      onBackToMain();
+      onBackToMain(true); // Pass true to indicate a game just ended
     } catch (error) {
       console.error('Failed to save game result:', error);
       alert('Failed to save game result. The game has ended, but it may not appear in your recent games.');
-      // Even if there's an error, we should still end the game
-      localStorage.removeItem('gameState');
-      onBackToMain();
+      onBackToMain(true);
     }
   };
 
@@ -499,7 +525,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         <div className="flex justify-between items-center mb-4 bg-white bg-opacity-80 p-2 rounded">
           <p className="font-medium">Current Time: {new Date().toLocaleTimeString()}</p>
           <p className="font-medium">Game Start Time: {gameState.gameStartTime?.toLocaleTimeString()}</p>
-          <p className="font-medium">Lobby Time: {lobbyTime} seconds</p>
+          <p className="font-medium">Lobby Time: {gameState.lobbyTime} seconds</p>
         </div>
 
         <div className="flex space-x-4 mt-4">
