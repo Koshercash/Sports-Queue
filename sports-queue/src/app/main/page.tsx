@@ -97,7 +97,6 @@ interface LeaderboardPlayer {
   profilePicture: string | null;
   mmr: number;
   rank: number;
-  position: string; // Added position property
 }
 
 export default function MainScreen() {
@@ -1014,13 +1013,9 @@ export default function MainScreen() {
                                 onClick={() => handlePlayerClick(player.id)}
                                 size="medium"
                               />
-                              <div>
+                              <div className="flex items-center space-x-4">
                                 <p className="text-xl font-semibold">{player.name}</p>
-                                <div className="flex items-center space-x-2 text-sm text-gray-500">
-                                  <span>MMR: {player.mmr}</span>
-                                  <span>•</span>
-                                  <span>Position: {player.position}</span>
-                                </div>
+                                <span className="text-2xl font-bold text-green-600">MMR: {player.mmr}</span>
                               </div>
                             </div>
                             <div className="text-2xl font-bold text-gray-400">#{player.rank}</div>                          </CardContent>
