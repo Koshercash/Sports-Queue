@@ -5,12 +5,14 @@ import axios from 'axios'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ArrowLeft, Check } from 'lucide-react'
+import { ArrowLeft, Check, AlertCircle } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { UserProfile } from '@/components/UserProfile'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useGameState } from '@/components/GameStateProvider'
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Label } from "@/components/ui/label"
 
 interface Player {
   id: string;
@@ -53,6 +55,8 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   const [selectedProfile, setSelectedProfile] = useState<UserProfileData | null>(null);
   const [showLeavePrompt, setShowLeavePrompt] = useState(false)
   const [leaveWarningMessage, setLeaveWarningMessage] = useState('')
+  const [reportedPlayer, setReportedPlayer] = useState<string | null>(null);
+  const [reportReason, setReportReason] = useState<string | null>(null);
 
   useEffect(() => {
     // Load game state from localStorage on component mount
@@ -256,6 +260,34 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     }
   };
 
+  const handleReportPlayer = (playerId: string) => {
+    setReportedPlayer(playerId);
+    setReportReason(null);
+  };
+
+  const confirmReportPlayer = async () => {
+    if (reportedPlayer && reportReason) {
+      try {
+        const token = localStorage.getItem('token');
+        await axios.post('http://localhost:3002/api/report-player', 
+          { 
+            reportedPlayerId: reportedPlayer,
+            reason: reportReason
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        alert('Player reported successfully');
+      } catch (error) {
+        console.error('Failed to report player:', error);
+        alert('Failed to report player. Please try again.');
+      }
+      setReportedPlayer(null);
+      setReportReason(null);
+    } else {
+      alert('Please select a reason for reporting.');
+    }
+  };
+
   const getPlayerImage = (player: Player) => {
     if (player.profilePicture) {
       return player.profilePicture.startsWith('http') 
@@ -293,8 +325,8 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         ...prevState,
         isReady: newReadyState,
         readyCount: newReadyState ? prevState.readyCount + 1 : prevState.readyCount - 1,
-        gameState: newReadyState ? 'inProgress' : 'lobby', // Start the game immediately when ready
-        totalGameTime: newReadyState ? 120 : 0, // Reset total game time to 120 seconds (2 minutes for testing)
+        gameState: newReadyState ? 'inProgress' : 'lobby',
+        totalGameTime: newReadyState ? 120 : 0,
         halfTimeOccurred: false,
       }));
     }
@@ -659,6 +691,15 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
               {!selectedProfile.isCurrentUser && (
                 <Button onClick={handleAddFriend}>Add Friend</Button>
               )}
+              {!selectedProfile.isCurrentUser && gameState.gameState !== 'ended' && (
+                <Button 
+                  onClick={() => handleReportPlayer(selectedProfile.id)}
+                  className="bg-red-500 hover:bg-red-600 text-white"
+                >
+                  <AlertCircle className="mr-2 h-4 w-4" />
+                  Report Player
+                </Button>
+              )}
             </div>
           </DialogContent>
         </Dialog>
@@ -678,6 +719,56 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
           <div className="flex justify-end space-x-2 mt-4">
             <Button variant="outline" onClick={() => setShowLeavePrompt(false)}>Cancel</Button>
             <Button onClick={handleConfirmLeave}>Leave Game</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add this new Dialog for confirming player reports */}
+      <Dialog open={!!reportedPlayer} onOpenChange={() => setReportedPlayer(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Report Player</DialogTitle>
+            <DialogDescription>
+              Please select the primary reason for reporting this player. Choose the most significant issue. False reports may result in penalties.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {[
+              { value: "excessive_fouling", label: "Excessive Fouling" },
+              { value: "cheating", label: "Cheating" },
+              { value: "verbal_abuse", label: "Verbal Abuse/Harassment" },
+              { value: "no_show", label: "No Show/Leaving" },
+              { value: "physical_fighting", label: "Physical Fighting" },
+              { value: "false_score", label: "False Score Reporting" }
+            ].map((option) => (
+              <div key={option.value} className="flex items-center space-x-2">
+                <input
+                  type="radio"
+                  id={option.value}
+                  name="reportReason"
+                  value={option.value}
+                  checked={reportReason === option.value}
+                  onChange={() => setReportReason(option.value)}
+                  className="form-radio h-4 w-4 text-green-600"
+                />
+                <Label htmlFor={option.value}>{option.label}</Label>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end space-x-2 mt-4">
+            <Button variant="outline" onClick={() => {
+              setReportedPlayer(null);
+              setReportReason(null);
+            }}>
+              Cancel
+            </Button>
+            <Button 
+              onClick={confirmReportPlayer} 
+              className="bg-red-500 hover:bg-red-600 text-white"
+              disabled={!reportReason}
+            >
+              Confirm Report
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
