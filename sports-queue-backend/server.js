@@ -9,7 +9,6 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import geolib from 'geolib';
-
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -767,6 +766,52 @@ async function startServer() {
     }
   });
 
+  // Add this new route for leaderboard data
+  app.get('/api/leaderboard', authMiddleware, async (req, res) => {
+    try {
+      const { mode, gender, page = 1, limit = 50, search = '' } = req.query;
+      const modeField = mode === '5v5' ? 'mmr5v5' : 'mmr11v11';
+      const skip = (page - 1) * limit;
+
+      // First, get the total count of players matching the gender criteria
+      const totalPlayers = await User.countDocuments({ sex: gender });
+
+      // Then, get the players for the current page
+      const players = await User.find({
+        sex: gender,
+        name: { $regex: search, $options: 'i' }
+      })
+        .sort({ [modeField]: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select('name profilePicturePath mmr5v5 mmr11v11');
+
+      // Calculate the rank for each player
+      const leaderboardData = await Promise.all(players.map(async (player) => {
+        const rank = await User.countDocuments({
+          sex: gender,
+          [modeField]: { $gt: player[modeField] }
+        }) + 1;
+
+        return {
+          id: player._id,
+          name: player.name,
+          profilePicture: player.profilePicturePath ? `/uploads/${player.profilePicturePath}` : null,
+          mmr: player[modeField],
+          rank
+        };
+      }));
+
+      res.json({
+        players: leaderboardData,
+        totalPlayers
+      });
+    } catch (error) {
+      console.error('Error fetching leaderboard:', error);
+      res.status(500).json({ error: 'Failed to fetch leaderboard' });
+    }
+  });
+
   // Update the error handling middleware
   app.use((err, req, res, next) => {
     console.error(err.stack);
@@ -797,7 +842,7 @@ async function startServer() {
           password: hashedPassword,
           mmr5v5: mmr,
           mmr11v11: mmr,
-          dateOfBirth: new Date(userData.dateOfBirth),
+          dateOfBirth: new Date(userData.dateOfBirth)
         });
         await user.save();
         console.log(`Created sample user: ${userData.name}`);

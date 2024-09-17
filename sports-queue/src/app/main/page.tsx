@@ -91,6 +91,15 @@ interface Player {
   profilePicture?: string | null;
 }
 
+interface LeaderboardPlayer {
+  id: string;
+  name: string;
+  profilePicture: string | null;
+  mmr: number;
+  rank: number;
+  position: string; // Added position property
+}
+
 export default function MainScreen() {
   const [gameMode, setGameMode] = useState<'5v5' | '11v11'>('5v5')
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
@@ -125,6 +134,14 @@ export default function MainScreen() {
   const { latitude, longitude, error: geoError } = useGeolocation();
   const [matchHistory, setMatchHistory] = useState<RecentGame[]>([]);
   const [shouldRefreshMatchHistory, setShouldRefreshMatchHistory] = useState(false);
+
+  const [leaderboardPlayers, setLeaderboardPlayers] = useState<LeaderboardPlayer[]>([]);
+  const [leaderboardMode, setLeaderboardMode] = useState<'5v5' | '11v11'>('5v5');
+  const [leaderboardGender, setLeaderboardGender] = useState<'male' | 'female'>('male');
+  const [leaderboardPage, setLeaderboardPage] = useState(1);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const playersPerPage = 50; // Adjust this number as needed
+  const [leaderboardSearch, setLeaderboardSearch] = useState('');
 
   const totalNotifications = pendingRequests.length + newMessages;
 
@@ -744,6 +761,47 @@ export default function MainScreen() {
     fetchUserProfile(playerId);
   };
 
+  const fetchLeaderboard = async (page = 1) => {
+    try {
+      setIsLoadingMore(true);
+      const token = localStorage.getItem('token');
+      const response = await axios.get<{ players: LeaderboardPlayer[], totalPlayers: number }>('http://localhost:3002/api/leaderboard', {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { 
+          mode: leaderboardMode, 
+          gender: leaderboardGender,
+          page: page,
+          limit: playersPerPage,
+          search: leaderboardSearch
+        }
+      });
+      const playersWithFullUrls = response.data.players.map(player => ({
+        ...player,
+        profilePicture: player.profilePicture 
+          ? `http://localhost:3002${player.profilePicture}`
+          : null
+      }));
+      if (page === 1) {
+        setLeaderboardPlayers(playersWithFullUrls);
+      } else {
+        setLeaderboardPlayers(prev => [...prev, ...playersWithFullUrls]);
+      }
+      setLeaderboardPage(page);
+      setIsLoadingMore(false);
+    } catch (error) {
+      console.error('Failed to fetch leaderboard:', error);
+      setIsLoadingMore(false);
+    }
+  };
+
+  const handleLoadMore = () => {
+    fetchLeaderboard(leaderboardPage + 1);
+  };
+
+  useEffect(() => {
+    fetchLeaderboard(1);
+  }, [leaderboardMode, leaderboardGender]);
+
   // Render the GameScreen component if inGame is true
   if (inGame && match) {
     return (
@@ -916,24 +974,72 @@ export default function MainScreen() {
           </TabsContent>
           <TabsContent value="leaderboard">
             <Card>
-              <CardHeader>
-                <CardTitle>Leaderboard</CardTitle>
-                <CardDescription>Top players based on MMR</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ul className="space-y-2">
-                  {[1, 2, 3].map((rank) => (
-                    <li key={rank} className="flex items-center space-x-2 border-b pb-2">
-                      <span className="font-bold">{rank}.</span>
-                      <Avatar>
-                        <AvatarImage src={`/placeholder-avatar-${rank}.jpg`} alt={`Rank ${rank} player`} />
-                        <AvatarFallback>R{rank}</AvatarFallback>
-                      </Avatar>
-                      <span>Player {rank}</span>
-                      <span className="ml-auto">MRR: {2000 - (rank * 100)}</span>
-                    </li>
-                  ))}
-                </ul>
+              <CardContent className="pt-6">
+                <div className="flex justify-between items-center mb-4">
+                  <div className="flex space-x-2">
+                    <Tabs defaultValue="5v5" onValueChange={(value) => setLeaderboardMode(value as '5v5' | '11v11')}>
+                      <TabsList className="h-8">
+                        <TabsTrigger value="5v5" className="px-2 py-1 text-sm">5v5</TabsTrigger>
+                        <TabsTrigger value="11v11" className="px-2 py-1 text-sm">11v11</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                    <Tabs defaultValue="male" onValueChange={(value) => setLeaderboardGender(value as 'male' | 'female')}>
+                      <TabsList className="h-8">
+                        <TabsTrigger value="male" className="px-2 py-1 text-sm">Male</TabsTrigger>
+                        <TabsTrigger value="female" className="px-2 py-1 text-sm">Female</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                  <Input
+                    type="text"
+                    placeholder="Search player"
+                    className="w-48"
+                    value={leaderboardSearch}
+                    onChange={(e) => setLeaderboardSearch(e.target.value)}
+                  />
+                </div>
+                <div className="mt-4">
+                  <h3 className="text-lg font-semibold mb-2">
+                    Top {leaderboardGender === 'male' ? 'Male' : 'Female'} Players ({leaderboardMode})
+                  </h3>
+                  <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+                    {leaderboardPlayers
+                      .filter(player => player.name.toLowerCase().includes(leaderboardSearch.toLowerCase()))
+                      .map((player, index) => (
+                        <Card key={player.id} className="overflow-hidden">
+                          <CardContent className="p-4 flex items-center justify-between">
+                            <div className="flex items-center space-x-4">
+                              <InteractableProfilePicture
+                                currentImage={player.profilePicture}
+                                onClick={() => handlePlayerClick(player.id)}
+                                size="medium"
+                              />
+                              <div>
+                                <p className="text-xl font-semibold">{player.name}</p>
+                                <div className="flex items-center space-x-2 text-sm text-gray-500">
+                                  <span>MMR: {player.mmr}</span>
+                                  <span>•</span>
+                                  <span>Position: {player.position}</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-2xl font-bold text-gray-400">#{player.rank}</div>                          </CardContent>
+                        </Card>
+                      ))}
+                  </div>
+                  {leaderboardPlayers.length < 1000 && !isLoadingMore && (
+                    <Button 
+                      onClick={handleLoadMore} 
+                      className="w-full mt-4"
+                      disabled={isLoadingMore}
+                    >
+                      Load More
+                    </Button>
+                  )}
+                  {isLoadingMore && (
+                    <p className="text-center mt-4">Loading more players...</p>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
