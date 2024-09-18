@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "../../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -18,7 +18,9 @@ import { useGeolocation } from '@/hooks/useGeolocation';
 import MatchHistory from '@/components/MatchHistory';
 import { API_BASE_URL } from '../../config/api';
 import { UserContext } from '../../contexts/UserContext';
-import AdminDashboard from '../../components/AdminDashboard';
+import AdminDashboard from '@/components/AdminDashboard';
+import { jwtDecode } from "jwt-decode";
+import { LeaderboardPlayer } from '@/types/leaderboard';
 
 interface UserProfile {
   id: string;
@@ -93,14 +95,6 @@ interface Player {
   profilePicture?: string | null;
 }
 
-interface LeaderboardPlayer {
-  id: string;
-  name: string;
-  profilePicture: string | null;
-  mmr: number;
-  rank: number;
-}
-
 export default function MainScreen() {
   const { user } = useContext(UserContext);
   const router = useRouter();
@@ -145,6 +139,9 @@ export default function MainScreen() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const playersPerPage = 50;
   const [leaderboardSearch, setLeaderboardSearch] = useState('');
+
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
 
   const totalNotifications = pendingRequests.length + newMessages;
 
@@ -753,7 +750,7 @@ export default function MainScreen() {
     fetchUserProfile(playerId);
   };
 
-  const fetchLeaderboard = async (page = 1) => {
+  const fetchLeaderboard = useCallback(async (page = 1) => {
     try {
       setIsLoadingMore(true);
       const token = localStorage.getItem('token');
@@ -784,81 +781,69 @@ export default function MainScreen() {
       console.error('Failed to fetch leaderboard:', error);
       setIsLoadingMore(false);
     }
-  };
+  }, [leaderboardMode, leaderboardGender, leaderboardSearch]);
 
   useEffect(() => {
-    fetchLeaderboard(1);
-  }, [leaderboardMode, leaderboardGender]);
+    fetchLeaderboard();
+  }, [fetchLeaderboard]);
 
   const handleLoadMore = () => {
     fetchLeaderboard(leaderboardPage + 1);
   };
 
   useEffect(() => {
-    fetchLeaderboard(1);
-  }, [leaderboardMode, leaderboardGender]);
+    const token = localStorage.getItem('token');
+    if (token) {
+      try {
+        const decodedToken = jwtDecode(token) as { isAdmin?: boolean };
+        setIsAdmin(decodedToken.isAdmin || false);
+      } catch (error) {
+        console.error('Failed to decode token:', error);
+      }
+    }
+  }, []);
 
-  useEffect(() => {
-    console.log('Current user:', user);
-  }, [user]);
-
-  // Render the GameScreen component if inGame is true
-  if (inGame && match) {
-    return (
-      <GameScreen
-        mode={gameMode}
-        players={[...match.team1, ...match.team2].map(player => ({
-          id: player.id,
-          name: player.name,
-          position: player.position,
-          team: match.team1.some(t => t.id === player.id) ? 'blue' : 'red',
-          profilePicture: player.profilePicture || null
-        }))}
-        currentUserId={userProfile?.id || ''}
-        onBackToMain={handleBackFromGame}
-        onLeaveGame={handleLeaveGame}
-        lobbyTime={lobbyTime}
-      />
-    );
-  }
-
-  // Main return statement for the MainScreen component
   return (
     <div className="min-h-screen bg-white text-black relative overflow-hidden">
-      {activeTab === 'home' && <div className={styles.backgroundText}></div>}
       <header className="relative z-20 flex justify-between items-center p-4 bg-green-500 text-white">
         <h1 className="text-2xl font-bold">Sports Queue</h1>
-        <Dialog open={infoDialogOpen} onOpenChange={setInfoDialogOpen}>
-          <DialogTrigger asChild>
-            <Button variant="outline" className="text-white border-white hover:bg-green-600" onClick={() => setInfoDialogOpen(true)}>Info</Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[425px] z-50">
-            <DialogHeader>
-              <DialogTitle>Welcome to Sports Queue!</DialogTitle>
-              <DialogDescription>
-                <p className="mb-2">The best way to find your individual skill level, and quickly find competitive games near you.</p>
-                <h3 className="font-bold mt-4 mb-2">Rules:</h3>
-                <p className="mb-2">Sports Queue is entirely player ran, so it costs no money. However, for games you will need a red or blue jersey/penny or clothes to easily tell teams apart!</p>
-                <p className="mb-2">To make sure game scores are correctly reported, enter the correct game score after the game, after 30 minutes the game will be concluded, and the highest vote will be used.</p>
-                <h3 className="font-bold mt-4 mb-2">Cheating/Unfair Play:</h3>
-                <p className="mb-2">If you are reported by 3 or more players in a single game, or excessively reported over multiple, action will be taken. This can be for excessive fouling, breaking the rules of the game, or harassing a player. Any physical fights or purposely conspiring to report the wrong score will be met with a permanent ban.</p>
-                <p className="mb-2">Try to limit the roughness, focus on your skills as well as positioning and having fun! People may want to play many games so please do your best to not injure anyone else.</p>
-              </DialogDescription>
-            </DialogHeader>
-          </DialogContent>
-        </Dialog>
+        <div className="flex items-center space-x-2">
+          {isAdmin && (
+            <Button 
+              variant="outline" 
+              className="text-white border-white hover:bg-green-600"
+              onClick={() => setShowAdminPanel(!showAdminPanel)}
+            >
+              Admin
+            </Button>
+          )}
+          <Dialog open={infoDialogOpen} onOpenChange={setInfoDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" className="text-white border-white hover:bg-green-600" onClick={() => setInfoDialogOpen(true)}>Info</Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>Info</DialogTitle>
+                <DialogDescription>
+                  <p>Welcome to Sports Queue!</p>
+                  <p>Here's how it works:</p>
+                  <ol className="list-decimal pl-5">
+                    <li>Click the "Join Queue" button to find a game.</li>
+                    <li>Once you're matched, you'll be taken to the game screen.</li>
+                    <li>Enjoy your game!</li>
+                  </ol>
+                </DialogDescription>
+              </DialogHeader>
+            </DialogContent>
+          </Dialog>
+        </div>
       </header>
 
       <main className="relative z-10 p-4 pb-32 overflow-y-auto h-[calc(100vh-180px)]">
-        {removeMessage && (
-          <div className="mb-4 p-4 border border-green-500 bg-green-50 rounded-md">
-            <h4 className="font-bold">Notification</h4>
-            <p>{removeMessage}</p>
-          </div>
-        )}
-
+        {showAdminPanel && isAdmin && <AdminDashboard />}
+        
         <Tabs defaultValue="home" onValueChange={handleTabChange}>
-          <TabsList className="grid w-full grid-cols-5 mb-4">
+          <TabsList className="grid w-full grid-cols-6 mb-4">
             <TabsTrigger value="home">Home</TabsTrigger>
             <TabsTrigger value="profile">Profile</TabsTrigger>
             <TabsTrigger value="recent">Recent Games</TabsTrigger>
@@ -871,10 +856,13 @@ export default function MainScreen() {
                 </span>
               )}
             </TabsTrigger>
+            {isAdmin && <TabsTrigger value="admin">Admin</TabsTrigger>}
           </TabsList>
+
           <TabsContent value="home">
             <Card>
               <CardHeader>
+                <CardTitle>Home</CardTitle>
                 <CardTitle>Welcome to Sports Queue</CardTitle>
                 <CardDescription>Your home for organizing and joining sports games</CardDescription>
               </CardHeader>
@@ -1149,6 +1137,19 @@ export default function MainScreen() {
               </CardContent>
             </Card>
           </TabsContent>
+          {isAdmin && (
+            <TabsContent value="admin">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Admin Panel</CardTitle>
+                  <CardDescription>Manage users and system settings</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <AdminDashboard />
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
         </Tabs>
       </main>
 
