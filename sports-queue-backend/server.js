@@ -10,8 +10,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import rateLimit from 'express-rate-limit';
 import Joi from 'joi';
-import https from 'https';
-import fs from 'fs';
 
 dotenv.config();
 
@@ -149,8 +147,8 @@ async function startServer() {
     }
   }
   async function createAdminUser() {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com';
-    const adminPassword = process.env.ADMIN_PASSWORD || 'adminpassword';
+    const adminEmail = process.env.ADMIN_EMAIL || 'Reuven5771@gmail.com';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'Remember4';
     const existingAdmin = await User.findOne({ email: adminEmail });
     if (!existingAdmin) {
       const hashedPassword = await bcrypt.hash(adminPassword, 10);
@@ -159,15 +157,17 @@ async function startServer() {
         email: adminEmail,
         password: hashedPassword,
         isAdmin: true,
-        phone: '1234567890', // Add a default phone number
-        sex: 'other', // Add a default sex
-        position: 'admin', // Add a default position
-        skillLevel: 'pro', // Add a default skill level
-        dateOfBirth: new Date('1990-01-01'), // Add a default date of birth
-        cityTown: 'Admin City', // Add a default city/town
+        phone: '1234567890',
+        sex: 'other',
+        position: 'admin',
+        skillLevel: 'pro',
+        dateOfBirth: new Date('1990-01-01'),
+        cityTown: 'Admin City',
       });
       await adminUser.save();
       console.log('Admin user created');
+    } else {
+      console.log('Admin user already exists');
     }
   }
   
@@ -201,13 +201,19 @@ async function startServer() {
     }
   
     await ban.save();
+
+    // Call notifyUserAboutBan after saving the ban
+    await notifyUserAboutBan(userId, ban.stage, ban.expiresAt);
+    console.log(`User ${userId} banned at stage ${ban.stage} until ${ban.expiresAt}`);
   }
-  await notifyUserAboutBan(userId, ban.stage, ban.expiresAt);
-  console.log(`User ${userId} banned at stage ${ban.stage} until ${ban.expiresAt}`);
 
-  console.log(`Notifying user ${userId} about ban stage ${banStage} expiring at ${expiresAt}`);
+  async function notifyUserAboutBan(userId, banStage, expiresAt) {
+    // Implement the notification logic here
+    // This could involve sending an email, push notification, or updating a user's notification list
+    console.log(`Notifying user ${userId} about ban stage ${banStage} expiring at ${expiresAt}`);
+    // For now, we'll just log the notification. You can expand this function later to actually send notifications.
+  }
 
-  
   async function checkAndResetBanStage() {
     const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     await Ban.updateMany(
@@ -299,7 +305,10 @@ async function startServer() {
       if (!user || !(await bcrypt.compare(password, user.password))) {
         return res.status(400).json({ error: 'Invalid credentials' });
       }
-      const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET || 'your_jwt_secret');
+      const token = jwt.sign(
+        { userId: user._id, isAdmin: user.isAdmin },
+        process.env.JWT_SECRET || 'your_jwt_secret'
+      );
       res.json({ token });
     } catch (error) {
       res.status(400).json({ error: 'Login failed' });
@@ -1161,15 +1170,11 @@ app.post('/api/admin/ban-appeal', authMiddleware, adminMiddleware, async (req, r
     }
   });
 
-  const options = {
-    key: fs.readFileSync('path/to/your/key.pem'),
-    cert: fs.readFileSync('path/to/your/cert.pem')
-  };
-
   const PORT = process.env.PORT || 3002;
-  https.createServer(options, app).listen(PORT, () => {
-    console.log(`HTTPS Server running on port ${PORT}`);
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
   });
+
   setInterval(checkAndResetBanStage, 24 * 60 * 60 * 1000); // Run once a day
 }
 
