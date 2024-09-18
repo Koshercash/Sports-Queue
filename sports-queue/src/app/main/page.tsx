@@ -1,7 +1,6 @@
-
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "../../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -17,6 +16,9 @@ import styles from './styles.module.css';
 import GameScreen from '../game/page';
 import { useGeolocation } from '@/hooks/useGeolocation';
 import MatchHistory from '@/components/MatchHistory';
+import { API_BASE_URL } from '../../config/api';
+import { UserContext } from '../../contexts/UserContext';
+import AdminDashboard from '../../components/AdminDashboard';
 
 interface UserProfile {
   id: string;
@@ -29,7 +31,7 @@ interface UserProfile {
   mmr5v5: number;
   mmr11v11: number;
   bio: string;
-  cityTown: string; // Added cityTown property
+  cityTown: string;
 }
 
 interface Friend {
@@ -59,9 +61,9 @@ interface UserProfileData {
   profilePicture: string | null;
   isCurrentUser: boolean;
   mmr5v5: number;
-  mmr11v11: number;
+  mmr111v11: number;
   bio: string;
-  cityTown: string; // Added cityTown property
+  cityTown: string;
 }
 
 interface PendingRequest {
@@ -79,8 +81,8 @@ interface RecentGame {
   endTime: string;
   distance: number;
   players: { id: string; name: string; profilePicture?: string }[];
-  mmrChange: number; // Added mmrChange property
-  averageMMR: number; // Added averageMMR property
+  mmrChange: number;
+  averageMMR: number;
 }
 
 interface Player {
@@ -100,12 +102,15 @@ interface LeaderboardPlayer {
 }
 
 export default function MainScreen() {
-  const [gameMode, setGameMode] = useState<'5v5' | '11v11'>('5v5')
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
-  const [friends, setFriends] = useState<Friend[]>([])
-  const [searchResults, setSearchResults] = useState<UserProfile[]>([])
-  const [searchQuery, setSearchQuery] = useState('')
+  const { user } = useContext(UserContext);
   const router = useRouter();
+  const { latitude, longitude, error: geoError } = useGeolocation();
+
+  const [gameMode, setGameMode] = useState<'5v5' | '11v11'>('5v5');
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const [queueStatus, setQueueStatus] = useState<'idle' | 'queuing' | 'matched'>('idle');
   const [match, setMatch] = useState<Match | null>(null);
@@ -130,7 +135,6 @@ export default function MainScreen() {
   const [lobbyTime, setLobbyTime] = useState(0);
 
   const [recentGames, setRecentGames] = useState<RecentGame[]>([]);
-  const { latitude, longitude, error: geoError } = useGeolocation();
   const [matchHistory, setMatchHistory] = useState<RecentGame[]>([]);
   const [shouldRefreshMatchHistory, setShouldRefreshMatchHistory] = useState(false);
 
@@ -139,7 +143,7 @@ export default function MainScreen() {
   const [leaderboardGender, setLeaderboardGender] = useState<'male' | 'female'>('male');
   const [leaderboardPage, setLeaderboardPage] = useState(1);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const playersPerPage = 50; // Adjust this number as needed
+  const playersPerPage = 50;
   const [leaderboardSearch, setLeaderboardSearch] = useState('');
 
   const totalNotifications = pendingRequests.length + newMessages;
@@ -197,7 +201,6 @@ export default function MainScreen() {
         setLobbyTime(parsedGameState.lobbyTime || 0);
         setQueueStatus('matched');
         
-        // Remove the isReturning flag
         localStorage.setItem('gameState', JSON.stringify({
           ...parsedGameState,
           isReturning: false
@@ -220,7 +223,6 @@ export default function MainScreen() {
       }
     }
 
-    // Check penalty status before joining queue
     await checkPenaltyStatus();
 
     if (isPenalized) {
@@ -232,7 +234,7 @@ export default function MainScreen() {
       try {
         const token = localStorage.getItem('token');
         console.log('Attempting to join queue with token:', token ? 'Token exists' : 'No token');
-        const response = await axios.post('http://localhost:3002/api/queue/join', 
+        const response = await axios.post(`${API_BASE_URL}/api/queue/join`, 
           { gameMode },
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -245,7 +247,7 @@ export default function MainScreen() {
             setGameState('inGame');
             setInGame(true);
             setIsGameInProgress(true);
-            setLobbyTime(0); // Reset lobby time for new game
+            setLobbyTime(0);
             localStorage.setItem('gameState', JSON.stringify({
               gameState: 'inGame',
               match: response.data.match,
@@ -267,10 +269,9 @@ export default function MainScreen() {
         }
       }
     } else if (queueStatus === 'queuing') {
-      // Logic to leave the queue
       try {
         const token = localStorage.getItem('token');
-        await axios.post('http://localhost:3002/api/queue/leave', 
+        await axios.post(`${API_BASE_URL}/api/queue/leave`, 
           { gameMode },
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -287,18 +288,17 @@ export default function MainScreen() {
     try {
       const token = localStorage.getItem('token');
       const url = userId 
-        ? `http://localhost:3002/api/user/${userId}`
-        : 'http://localhost:3002/api/user-profile';
+        ? `${API_BASE_URL}/api/user/${userId}`
+        : `${API_BASE_URL}/api/user-profile`;
       
       const response = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
-      // Ensure the profilePicture URL is complete and add cityTown
       const userData = {
         ...response.data,
         profilePicture: response.data.profilePicture
-          ? `http://localhost:3002${response.data.profilePicture}`
+          ? `${API_BASE_URL}${response.data.profilePicture}`
           : null,
         cityTown: response.data.cityTown || ''
       };
@@ -320,7 +320,7 @@ export default function MainScreen() {
   const fetchFriends = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get<{ friends: Friend[], pendingRequests: PendingRequest[] }>('http://localhost:3002/api/friends', {
+      const response = await axios.get<{ friends: Friend[], pendingRequests: PendingRequest[] }>(`${API_BASE_URL}/api/friends`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
@@ -352,7 +352,7 @@ export default function MainScreen() {
   const searchUsers = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get(`http://localhost:3002/api/users/search?query=${searchQuery}`, {
+      const response = await axios.get(`${API_BASE_URL}/api/users/search?query=${searchQuery}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const formattedResults = response.data
@@ -361,7 +361,7 @@ export default function MainScreen() {
           profilePicture: user.profilePicture 
             ? user.profilePicture.startsWith('http')
               ? user.profilePicture
-              : `http://localhost:3002${user.profilePicture}`
+              : `${API_BASE_URL}${user.profilePicture}`
             : null
         }))
         .filter((user: UserProfile) => !friends.some(friend => friend.id === user.id));
@@ -375,7 +375,7 @@ export default function MainScreen() {
   const addFriend = async (friendId: string) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.post('http://localhost:3002/api/friends/add', { friendId }, {
+      const response = await axios.post(`${API_BASE_URL}/api/friends/add`, { friendId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
@@ -397,14 +397,14 @@ export default function MainScreen() {
   const acceptFriendRequest = async (friendId: string) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.post('http://localhost:3002/api/friends/accept', { friendId }, {
+      const response = await axios.post(`${API_BASE_URL}/api/friends/accept`, { friendId }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
       console.log('Server response for accepting friend request:', response.data);
 
       setRemoveMessage('Friend request accepted successfully.');
-      fetchFriends(); // Refresh the friends list and pending requests
+      fetchFriends();
     } catch (error) {
       console.error('Failed to accept friend request:', error);
       setRemoveMessage('Failed to accept friend request. Please try again.');
@@ -438,7 +438,7 @@ export default function MainScreen() {
     try {
       const token = localStorage.getItem('token');
       console.log('Using token:', token ? 'Token exists' : 'No token found');
-      const response = await axios.delete(`http://localhost:3002/api/friends/${friendToRemove.id}`, {
+      const response = await axios.delete(`${API_BASE_URL}/api/friends/${friendToRemove.id}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       console.log('Server response:', response.data);
@@ -464,7 +464,7 @@ export default function MainScreen() {
       const token = localStorage.getItem('token');
       if (!token) return;
 
-      const response = await axios.get('http://localhost:3002/api/penalty/status', {
+      const response = await axios.get(`${API_BASE_URL}/api/penalty/status`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -491,14 +491,13 @@ export default function MainScreen() {
         return;
       }
       console.log('Fetching match history...');
-      const response = await axios.get<RecentGame[]>('http://localhost:3002/api/user/match-history', {
+      const response = await axios.get<RecentGame[]>(`${API_BASE_URL}/api/user/match-history`, {
         headers: { Authorization: `Bearer ${token}` },
         params: { limit: 5 }
       });
       console.log('Fetched match history:', response.data);
       setMatchHistory(response.data);
 
-      // Add a sample match to the match history
       const sampleMatch: RecentGame = {
         id: 'sample-match-id',
         mode: '5v5',
@@ -514,8 +513,8 @@ export default function MainScreen() {
           { id: 'player5', name: 'Charlie Davis' },
         ],
         distance: 5,
-        mmrChange: 10, // Added mmrChange property
-        averageMMR: 1500 // Added averageMMR property
+        mmrChange: 10,
+        averageMMR: 1500
       };
 
       setMatchHistory([sampleMatch, ...response.data]);
@@ -528,12 +527,11 @@ export default function MainScreen() {
   const handleBioChange = async (newBio: string) => {
     try {
       const token = localStorage.getItem('token');
-      await axios.put('http://localhost:3002/api/user/bio', { bio: newBio }, {
+      await axios.put(`${API_BASE_URL}/api/user/bio`, { bio: newBio }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setSelectedProfile(prev => prev ? { ...prev, bio: newBio } : null);
       
-      // Update the userProfile state as well
       setUserProfile(prev => prev ? { ...prev, bio: newBio } : null);
     } catch (error) {
       console.error('Failed to update bio:', error);
@@ -553,7 +551,7 @@ export default function MainScreen() {
       formData.append('profilePicture', file);
 
       const token = localStorage.getItem('token');
-      const response = await axios.post<{ profilePicture: string }>('http://localhost:3002/api/user/profile-picture', formData, {
+      const response = await axios.post<{ profilePicture: string }>(`${API_BASE_URL}/api/user/profile-picture`, formData, {
         headers: { 
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'multipart/form-data'
@@ -561,7 +559,7 @@ export default function MainScreen() {
       });
 
       if (response.data.profilePicture) {
-        const fullProfilePictureUrl = `http://localhost:3002${response.data.profilePicture}`;
+        const fullProfilePictureUrl = `${API_BASE_URL}${response.data.profilePicture}`;
         setUserProfile(prevProfile => prevProfile ? {
           ...prevProfile,
           profilePicture: fullProfilePictureUrl
@@ -576,7 +574,7 @@ export default function MainScreen() {
   const handleLeaveGame = async (gameStartTime: Date | null) => {
     try {
       console.log('Sending leave game request with:', { lobbyTime, gameStartTime });
-      const response = await axios.post('http://localhost:3002/api/game/leave', {
+      const response = await axios.post(`${API_BASE_URL}/api/game/leave`, {
         lobbyTime,
         gameStartTime: gameStartTime?.toISOString()
       }, {
@@ -584,7 +582,6 @@ export default function MainScreen() {
       });
       console.log('Leave game response:', response.data);
       
-      // Reset all game-related states
       setInGame(false);
       setIsGameInProgress(false);
       setMatch(null);
@@ -607,7 +604,6 @@ export default function MainScreen() {
         console.error('Axios error details:', error.response?.data);
       }
     } finally {
-      // Always reset these states, even if there's an error
       setInGame(false);
       setIsGameInProgress(false);
       setMatch(null);
@@ -651,7 +647,7 @@ export default function MainScreen() {
     if (removeMessage) {
       const timer = setTimeout(() => {
         setRemoveMessage(null);
-      }, 5000); // Clear the message after 5 seconds
+      }, 5000);
 
       return () => clearTimeout(timer);
     }
@@ -662,7 +658,7 @@ export default function MainScreen() {
     if (queueStatus === 'queuing') {
       interval = setInterval(() => {
         setDots(prev => (prev.length >= 3 ? '' : prev + '.'));
-      }, 750); // Slowed down to 750ms (3/4 of a second)
+      }, 750);
     }
     return () => clearInterval(interval);
   }, [queueStatus]);
@@ -675,7 +671,7 @@ export default function MainScreen() {
     }
 
     const initializeApp = async () => {
-      await checkPenaltyStatus(); // Check penalty status immediately
+      await checkPenaltyStatus();
       await fetchUserProfile();
       await fetchFriends();
     };
@@ -685,7 +681,7 @@ export default function MainScreen() {
     const intervalId = setInterval(() => {
       checkPenaltyStatus();
       fetchUserProfile();
-    }, 60000); // Refresh penalty status and profile every minute
+    }, 60000);
 
     return () => clearInterval(intervalId);
   }, [router]);
@@ -705,21 +701,18 @@ export default function MainScreen() {
       if (latitude && longitude) {
         try {
           const token = localStorage.getItem('token');
-          const response = await axios.get<RecentGame[]>('http://localhost:3002/api/games/recent', {
+          const response = await axios.get<RecentGame[]>(`${API_BASE_URL}/api/games/recent`, {
             headers: { Authorization: `Bearer ${token}` },
             params: { latitude, longitude }
           });
           
-          // Filter games to only include those within 50 miles
           const nearbyGames = response.data.filter(game => game.distance <= 50);
 
-          // Combine nearby games with match history, removing duplicates
           const allGames = [...nearbyGames, ...matchHistory];
           const uniqueGames = allGames.filter((game, index, self) =>
             index === self.findIndex((t) => t.id === game.id)
           );
           
-          // Sort by end time, most recent first
           uniqueGames.sort((a, b) => new Date(b.endTime).getTime() - new Date(a.endTime).getTime());
           
           setRecentGames(uniqueGames);
@@ -764,7 +757,7 @@ export default function MainScreen() {
     try {
       setIsLoadingMore(true);
       const token = localStorage.getItem('token');
-      const response = await axios.get<{ players: LeaderboardPlayer[], totalPlayers: number }>('http://localhost:3002/api/leaderboard', {
+      const response = await axios.get<{ players: LeaderboardPlayer[], totalPlayers: number }>(`${API_BASE_URL}/api/leaderboard`, {
         headers: { Authorization: `Bearer ${token}` },
         params: { 
           mode: leaderboardMode, 
@@ -777,7 +770,7 @@ export default function MainScreen() {
       const playersWithFullUrls = response.data.players.map(player => ({
         ...player,
         profilePicture: player.profilePicture 
-          ? `http://localhost:3002${player.profilePicture}`
+          ? `${API_BASE_URL}${player.profilePicture}`
           : null
       }));
       if (page === 1) {
@@ -793,6 +786,10 @@ export default function MainScreen() {
     }
   };
 
+  useEffect(() => {
+    fetchLeaderboard(1);
+  }, [leaderboardMode, leaderboardGender]);
+
   const handleLoadMore = () => {
     fetchLeaderboard(leaderboardPage + 1);
   };
@@ -800,6 +797,10 @@ export default function MainScreen() {
   useEffect(() => {
     fetchLeaderboard(1);
   }, [leaderboardMode, leaderboardGender]);
+
+  useEffect(() => {
+    console.log('Current user:', user);
+  }, [user]);
 
   // Render the GameScreen component if inGame is true
   if (inGame && match) {
@@ -1087,7 +1088,6 @@ export default function MainScreen() {
                     </ul>
                   </div>
                 )}
-                {/* Add new search bar for friends list */}
                 <div className="mb-4">
                   <Input 
                     placeholder="Filter friends" 
@@ -1182,6 +1182,7 @@ export default function MainScreen() {
             </DialogHeader>
             <UserProfile
               {...selectedProfile}
+              mmr11v11={selectedProfile.mmr111v11 || 0}
               onProfilePictureChange={undefined}
               onBioChange={handleBioChange}
             />
@@ -1214,3 +1215,4 @@ export default function MainScreen() {
     </div>
   )
 }
+
