@@ -913,40 +913,40 @@ export default function MainScreen() {
                 {geoError ? (
                   <p>Error fetching location. Please enable location services to see nearby games.</p>
                 ) : (
-                  <div className="space-y-6">
+                  <div className="space-y-4">
                     {recentGames.map((game) => (
                       <Card key={game.id} className="overflow-hidden">
-                        <CardHeader className="bg-gray-100 pb-2">
-                          <CardTitle className="text-xl flex justify-between items-start">
-                            <span>{new Date(game.endTime).toLocaleString()}</span>
-                            <span className="text-sm font-semibold text-gray-600">
+                        <CardHeader className="bg-gray-100 py-2 px-3">
+                          <CardTitle className="flex justify-between items-center">
+                            <span className="text-base w-1/3">{new Date(game.endTime).toLocaleString()}</span>
+                            <span className="text-lg font-bold w-1/3 text-center -ml-3">{game.mode}</span>
+                            <span className="text-sm font-semibold text-gray-600 w-1/3 text-right">
                               Avg MMR: {game.averageMMR}
                             </span>
                           </CardTitle>
                         </CardHeader>
-                        <CardContent className="pt-4">
-                          <div className="text-center mb-4">
-                            <p className="text-2xl font-semibold">{game.mode}</p>
-                          </div>
+                        <CardContent className="p-3">
+                          <p className="text-base mb-1 text-center font-semibold">{game.location}</p>
+                          <p className="text-sm mb-2 text-center text-gray-600">
+                            {game.distance.toFixed(1)} miles away
+                          </p>
                           <div className="flex justify-center items-center mb-4">
                             <span className="text-5xl font-bold text-blue-600 mr-4">{game.blueScore}</span>
-                            <span className="text-5xl font-bold">-</span>
+                            <span className="text-3xl font-bold">-</span>
                             <span className="text-5xl font-bold text-red-600 ml-4">{game.redScore}</span>
                           </div>
-                          <p className="text-xl mb-4 text-center">{game.location}</p>
-                          {game.distance && (
-                            <p className="text-lg mb-4 text-center">{game.distance.toFixed(1)} miles away</p>
-                          )}
                           <div>
-                            <p className="text-lg font-semibold mb-2">Players:</p>
-                            <div className="flex flex-wrap gap-4 justify-center">
+                            <p className="text-base font-semibold mb-2">Players:</p>
+                            <div className="flex flex-wrap gap-3 justify-center">
                               {game.players.map(player => (
                                 <div key={player.id} className="flex flex-col items-center">
-                                  <InteractableProfilePicture
-                                    currentImage={player.profilePicture || ''}
-                                    onClick={() => handlePlayerClick(player.id)}
-                                    size="small"
-                                  />
+                                  <div className="rounded-full overflow-hidden w-10 h-10">
+                                    <InteractableProfilePicture
+                                      currentImage={player.profilePicture || ''}
+                                      onClick={() => handlePlayerClick(player.id)}
+                                      size="small"
+                                    />
+                                  </div>
                                   <span className="text-sm mt-1">{player.name}</span>
                                 </div>
                               ))}
@@ -961,71 +961,92 @@ export default function MainScreen() {
             </Card>
           </TabsContent>
           <TabsContent value="leaderboard">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex justify-between items-center mb-4">
-                  <div className="flex space-x-2">
-                    <Tabs defaultValue="5v5" onValueChange={(value) => setLeaderboardMode(value as '5v5' | '11v11')}>
-                      <TabsList className="h-8">
-                        <TabsTrigger value="5v5" className="px-2 py-1 text-sm">5v5</TabsTrigger>
-                        <TabsTrigger value="11v11" className="px-2 py-1 text-sm">11v11</TabsTrigger>
-                      </TabsList>
-                    </Tabs>
-                    <Tabs defaultValue="male" onValueChange={(value) => setLeaderboardGender(value as 'male' | 'female')}>
-                      <TabsList className="h-8">
-                        <TabsTrigger value="male" className="px-2 py-1 text-sm">Male</TabsTrigger>
-                        <TabsTrigger value="female" className="px-2 py-1 text-sm">Female</TabsTrigger>
-                      </TabsList>
-                    </Tabs>
-                  </div>
-                  <Input
-                    type="text"
-                    placeholder="Search player"
-                    className="w-48"
-                    value={leaderboardSearch}
-                    onChange={(e) => setLeaderboardSearch(e.target.value)}
-                  />
+            <div className="pt-6">
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex space-x-2">
+                  <Tabs defaultValue="5v5" onValueChange={(value) => setLeaderboardMode(value as '5v5' | '11v11')}>
+                    <TabsList className="h-8">
+                      <TabsTrigger value="5v5" className="px-2 py-1 text-sm">5v5</TabsTrigger>
+                      <TabsTrigger value="11v11" className="px-2 py-1 text-sm">11v11</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                  <Tabs defaultValue="male" onValueChange={(value) => setLeaderboardGender(value as 'male' | 'female')}>
+                    <TabsList className="h-8">
+                      <TabsTrigger value="male" className="px-2 py-1 text-sm">Male</TabsTrigger>
+                      <TabsTrigger value="female" className="px-2 py-1 text-sm">Female</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
                 </div>
-                <div className="mt-4">
-                  <h3 className="text-lg font-semibold mb-2">
-                    Top {leaderboardGender === 'male' ? 'Male' : 'Female'} Players ({leaderboardMode})
-                  </h3>
-                  <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+                <Input
+                  type="text"
+                  placeholder="Search player"
+                  className="w-48"
+                  value={leaderboardSearch}
+                  onChange={(e) => setLeaderboardSearch(e.target.value)}
+                />
+              </div>
+              <div className="mt-4">
+                <h3 className="text-lg font-semibold mb-2">
+                  Top {leaderboardGender === 'male' ? 'Male' : 'Female'} Players ({leaderboardMode})
+                </h3>
+                <div className="flex space-x-4">
+                  <div className="w-1/2 space-y-2">
                     {leaderboardPlayers
                       .filter(player => player.name.toLowerCase().includes(leaderboardSearch.toLowerCase()))
-                      .map((player, index) => (
-                        <Card key={player.id} className="overflow-hidden">
-                          <CardContent className="p-4 flex items-center justify-between">
-                            <div className="flex items-center space-x-4">
+                      .slice(0, Math.ceil(leaderboardPlayers.length / 2))
+                      .map((player) => (
+                        <div key={player.id} className="flex items-center justify-between bg-white p-2 rounded-lg shadow">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-sm font-semibold w-6 text-right">#{player.rank}</span>
+                            <div className="rounded-full overflow-hidden w-8 h-8">
                               <InteractableProfilePicture
                                 currentImage={player.profilePicture}
                                 onClick={() => handlePlayerClick(player.id)}
-                                size="medium"
+                                size="small"
                               />
-                              <div className="flex items-center space-x-4">
-                                <p className="text-xl font-semibold">{player.name}</p>
-                                <span className="text-2xl font-bold text-green-600">MMR: {player.mmr}</span>
-                              </div>
                             </div>
-                            <div className="text-2xl font-bold text-gray-400">#{player.rank}</div>                          </CardContent>
-                        </Card>
+                            <span className="text-sm font-semibold">{player.name}</span>
+                          </div>
+                          <span className="text-sm font-bold text-green-600">MMR: {player.mmr}</span>
+                        </div>
                       ))}
                   </div>
-                  {leaderboardPlayers.length < 1000 && !isLoadingMore && (
-                    <Button 
-                      onClick={handleLoadMore} 
-                      className="w-full mt-4"
-                      disabled={isLoadingMore}
-                    >
-                      Load More
-                    </Button>
-                  )}
-                  {isLoadingMore && (
-                    <p className="text-center mt-4">Loading more players...</p>
-                  )}
+                  <div className="w-1/2 space-y-2">
+                    {leaderboardPlayers
+                      .filter(player => player.name.toLowerCase().includes(leaderboardSearch.toLowerCase()))
+                      .slice(Math.ceil(leaderboardPlayers.length / 2))
+                      .map((player) => (
+                        <div key={player.id} className="flex items-center justify-between bg-white p-2 rounded-lg shadow">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-sm font-semibold w-6 text-right">#{player.rank}</span>
+                            <div className="rounded-full overflow-hidden w-8 h-8">
+                              <InteractableProfilePicture
+                                currentImage={player.profilePicture}
+                                onClick={() => handlePlayerClick(player.id)}
+                                size="small"
+                              />
+                            </div>
+                            <span className="text-sm font-semibold">{player.name}</span>
+                          </div>
+                          <span className="text-sm font-bold text-green-600">MMR: {player.mmr}</span>
+                        </div>
+                      ))}
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
+                {leaderboardPlayers.length < 1000 && !isLoadingMore && (
+                  <Button 
+                    onClick={handleLoadMore} 
+                    className="w-full mt-4"
+                    disabled={isLoadingMore}
+                  >
+                    Load More
+                  </Button>
+                )}
+                {isLoadingMore && (
+                  <p className="text-center mt-4">Loading more players...</p>
+                )}
+              </div>
+            </div>
           </TabsContent>
           <TabsContent value="friends" className="h-[calc(100vh-260px)] overflow-y-auto">
             <Card>

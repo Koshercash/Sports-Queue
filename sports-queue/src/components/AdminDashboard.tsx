@@ -26,7 +26,8 @@ const AdminDashboard: React.FC = () => {
   const [banReason, setBanReason] = useState('');
   const [users, setUsers] = useState<User[]>([]);
   const [banAppeals, setBanAppeals] = useState<BanAppeal[]>([]);
-  const [view, setView] = useState<'ban' | 'users' | 'reports' | 'appeals'>('ban');
+  const [view, setView] = useState<'ban' | 'users' | 'pendingGames' | 'appeals'>('ban');
+  const [userSearchQuery, setUserSearchQuery] = useState('');
 
   useEffect(() => {
     fetchUsers();
@@ -120,12 +121,18 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const filteredUsers = users.filter(user => 
+    user.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+    user.email.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+    user.id.toLowerCase().includes(userSearchQuery.toLowerCase())
+  );
+
   return (
     <div className="space-y-4">
       <div className="flex space-x-2 mb-4">
         <Button onClick={() => setView('ban')}>Ban User</Button>
         <Button onClick={() => setView('users')}>Manage Users</Button>
-        <Button onClick={() => setView('reports')}>View Reports</Button>
+        <Button onClick={() => setView('pendingGames')}>Pending Games</Button>
         <Button onClick={() => setView('appeals')}>Ban Appeals</Button>
       </div>
 
@@ -162,8 +169,14 @@ const AdminDashboard: React.FC = () => {
       {view === 'users' && (
         <div>
           <h4 className="text-lg font-semibold mb-2">Manage Users</h4>
+          <Input 
+            placeholder="Search users..." 
+            value={userSearchQuery}
+            onChange={(e) => setUserSearchQuery(e.target.value)}
+            className="mb-4"
+          />
           <ul>
-            {users.map(user => (
+            {filteredUsers.map(user => (
               <li key={user.id} className="mb-2 flex items-center justify-between">
                 <span>{user.name} ({user.email}) - ID: {user.id}</span>
                 <div>
@@ -182,10 +195,10 @@ const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {view === 'reports' && (
+      {view === 'pendingGames' && (
         <div>
-          <h4 className="text-lg font-semibold mb-2">View Reports</h4>
-          <p>Report functionality to be implemented.</p>
+          <h4 className="text-lg font-semibold mb-2">Pending Games</h4>
+          <p>Pending Games functionality to be implemented.</p>
         </div>
       )}
 
