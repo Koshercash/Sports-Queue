@@ -8,7 +8,11 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import geolib from 'geolib';
+import rateLimit from 'express-rate-limit';
+import Joi from 'joi';
+import https from 'https';
+import fs from 'fs';
+
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -34,6 +38,7 @@ async function startServer() {
   console.log('Connected to in-memory MongoDB');
 
   const UserSchema = new mongoose.Schema({
+    isAdmin: { type: Boolean, default: false },
     name: String,
     email: { type: String, unique: true },
     password: String,
@@ -86,8 +91,131 @@ async function startServer() {
     penaltyEndTime: Date
   });
 
-  const Penalty = mongoose.model('Penalty', PenaltySchema);
+  const ReportSchema = new mongoose.Schema({
+    reportedUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reportingUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    game: { type: mongoose.Schema.Types.ObjectId, ref: 'Game' },
+    reason: String,
+    timestamp: { type: Date, default: Date.now }
+  });
+  
+  const Report = mongoose.model('Report', ReportSchema);
+
+  const BanSchema = new mongoose.Schema({
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    stage: { type: Number, default: 0 }, // 0: No ban, 1: Warning, 2: 1 day, 3: 7 days, 4: Permanent
+    expiresAt: Date,
+    lastProgressedAt: Date
+  });
  
+  const BanAppealSchema = new mongoose.Schema({
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reason: String,
+    status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    createdAt: { type: Date, default: Date.now }
+  });
+  
+  const BanAppeal = mongoose.model('BanAppeal', BanAppealSchema);
+
+  const Ban = mongoose.model('Ban', BanSchema);
+
+  const Penalty = mongoose.model('Penalty', PenaltySchema);
+
+  async function handleReport(reportedUserId, reportingUserId, gameId, reason) {
+    // Validate reportedUserId and gameId
+    const reportedUser = await User.findById(reportedUserId);
+    const game = await Game.findById(gameId);
+  
+    if (!reportedUser || !game) {
+      throw new Error('Invalid reportedUserId or gameId');
+    }
+  
+    const newReport = new Report({
+      reportedUser: reportedUserId,
+      reportingUser: reportingUserId,
+      game: gameId,
+      reason
+    });
+    await newReport.save();
+  
+    const reportsCount = await Report.countDocuments({
+      reportedUser: reportedUserId,
+      game: gameId
+    });
+  
+    if (reportsCount >= 3 || (reason === 'physical_fight' && reportsCount >= 6)) {
+      await progressBanStage(reportedUserId, reason === 'physical_fight');
+      console.log(`User ${reportedUserId} ban stage progressed due to ${reportsCount} reports in game ${gameId}`);
+    }
+  }
+  async function createAdminUser() {
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'adminpassword';
+    const existingAdmin = await User.findOne({ email: adminEmail });
+    if (!existingAdmin) {
+      const hashedPassword = await bcrypt.hash(adminPassword, 10);
+      const adminUser = new User({
+        name: 'Admin User',
+        email: adminEmail,
+        password: hashedPassword,
+        isAdmin: true,
+        phone: '1234567890', // Add a default phone number
+        sex: 'other', // Add a default sex
+        position: 'admin', // Add a default position
+        skillLevel: 'pro', // Add a default skill level
+        dateOfBirth: new Date('1990-01-01'), // Add a default date of birth
+        cityTown: 'Admin City', // Add a default city/town
+      });
+      await adminUser.save();
+      console.log('Admin user created');
+    }
+  }
+  
+  async function progressBanStage(userId, isPhysicalFight = false) {
+    let ban = await Ban.findOne({ user: userId });
+    if (!ban) {
+      ban = new Ban({ user: userId });
+    }
+  
+    if (isPhysicalFight) {
+      ban.stage = 4; // Permanent ban
+    } else {
+      ban.stage = Math.min(ban.stage + 1, 4);
+    }
+  
+    ban.lastProgressedAt = new Date();
+  
+    switch (ban.stage) {
+      case 1:
+        ban.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 1 week for warning
+        break;
+      case 2:
+        ban.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 1 day ban
+        break;
+      case 3:
+        ban.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 day ban
+        break;
+      case 4:
+        ban.expiresAt = null; // Permanent ban
+        break;
+    }
+  
+    await ban.save();
+  }
+  await notifyUserAboutBan(userId, ban.stage, ban.expiresAt);
+  console.log(`User ${userId} banned at stage ${ban.stage} until ${ban.expiresAt}`);
+
+  console.log(`Notifying user ${userId} about ban stage ${banStage} expiring at ${expiresAt}`);
+
+  
+  async function checkAndResetBanStage() {
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    await Ban.updateMany(
+      { lastProgressedAt: { $lt: oneWeekAgo }, stage: { $lt: 4 } },
+      { $set: { stage: 0, expiresAt: null } }
+    );
+  }
+
   async function checkUserPenalty(userId) {
     const penalty = await Penalty.findOne({ userId });
     if (penalty && penalty.penaltyEndTime && new Date() < penalty.penaltyEndTime) {
@@ -151,7 +279,7 @@ async function startServer() {
       });
 
       await user.save();
-      const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+      const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET || 'your_jwt_secret', { expiresIn: '1d' });
       res.status(201).json({ token });
     } catch (error) {
       console.error('Detailed registration error:', error);
@@ -159,28 +287,52 @@ async function startServer() {
     }
   });
 
-  app.post('/api/login', async (req, res) => {
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5 // limit each IP to 5 login requests per windowMs
+  });
+
+  app.post('/api/login', loginLimiter, async (req, res) => {
     try {
       const { email, password } = req.body;
       const user = await User.findOne({ email });
       if (!user || !(await bcrypt.compare(password, user.password))) {
         return res.status(400).json({ error: 'Invalid credentials' });
       }
-      const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET);
+      const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET || 'your_jwt_secret');
       res.json({ token });
     } catch (error) {
       res.status(400).json({ error: 'Login failed' });
     }
   });
 
-  const authMiddleware = (req, res, next) => {
+  const adminMiddleware = async (req, res, next) => {
+    try {
+      const user = await User.findById(req.userId);
+      if (!user || !user.isAdmin) {
+        return res.status(403).json({ error: 'Access denied. Admin rights required.' });
+      }
+      next();
+    } catch (error) {
+      res.status(500).json({ error: 'Error checking admin status' });
+    }
+  };
+
+  const authMiddleware = async (req, res, next) => {
     const authHeader = req.header('Authorization');
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return res.status(401).json({ error: 'Unauthorized' });
-
+  
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
       req.userId = decoded.userId;
+  
+      // Check if user is banned
+      const ban = await Ban.findOne({ user: req.userId });
+      if (ban && ban.expiresAt && ban.expiresAt > new Date()) {
+        return res.status(403).json({ error: 'User is banned', banExpiresAt: ban.expiresAt });
+      }
+  
       next();
     } catch (error) {
       res.status(401).json({ error: 'Invalid token' });
@@ -211,6 +363,99 @@ async function startServer() {
     } catch (error) {
       console.error('Error fetching user profile:', error);
       res.status(500).json({ error: 'Failed to fetch user profile', details: error.message });
+    }
+  });
+
+  // Input validation middleware
+  const validateInput = (schema) => {
+    return (req, res, next) => {
+      const { error } = schema.validate(req.body);
+      if (error) {
+        return res.status(400).json({ error: error.details[0].message });
+      }
+      next();
+    };
+  };
+
+  // Example schema for ban input
+  const banSchema = Joi.object({
+    userId: Joi.string().required(),
+    banStage: Joi.number().min(0).max(4).required(),
+    reason: Joi.string().required()
+  });
+
+  app.post('/api/report', authMiddleware, async (req, res) => {
+    try {
+      const { reportedUserId, gameId, reason } = req.body;
+      
+      // Validate input
+      if (!reportedUserId || !gameId || !reason) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+  
+      await handleReport(reportedUserId, req.userId, gameId, reason);
+      res.status(200).json({ message: 'Report submitted successfully' });
+    } catch (error) {
+      console.error('Error submitting report:', error);
+      res.status(500).json({ error: 'Failed to submit report', details: error.message });
+    }
+  });
+
+  app.post('/api/admin/ban', authMiddleware, adminMiddleware, validateInput(banSchema), async (req, res) => {
+  try {
+    const { userId, banStage, reason } = req.body;
+    await progressBanStage(userId, banStage === 4);
+    console.log(`Admin manually banned user ${userId} to stage ${banStage}. Reason: ${reason}`);
+    res.status(200).json({ message: 'User banned successfully' });
+  } catch (error) {
+    console.error('Error in admin ban:', error);
+    res.status(500).json({ error: 'Failed to ban user', details: error.message });
+  }
+});
+  
+app.post('/api/admin/ban-appeal', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { appealId, status } = req.body;
+    const appeal = await BanAppeal.findByIdAndUpdate(appealId, { status }, { new: true });
+    if (status === 'approved') {
+      await Ban.findOneAndUpdate({ user: appeal.user }, { stage: 0, expiresAt: null });
+      console.log(`Admin approved ban appeal for user ${appeal.user}`);
+    } else {
+      console.log(`Admin rejected ban appeal for user ${appeal.user}`);
+    }
+    res.status(200).json({ message: 'Ban appeal processed successfully' });
+  } catch (error) {
+    console.error('Error in admin ban appeal:', error);
+    res.status(500).json({ error: 'Failed to process ban appeal', details: error.message });
+  }
+});
+  
+  app.post('/api/admin/ban', authMiddleware, adminMiddleware, validateInput(banSchema), async (req, res) => {
+    try {
+      const { userId, banStage, reason } = req.body;
+      await progressBanStage(userId, banStage === 4);
+      console.log(`Admin manually banned user ${userId} to stage ${banStage}. Reason: ${reason}`);
+      res.status(200).json({ message: 'User banned successfully' });
+    } catch (error) {
+      console.error('Error in admin ban:', error);
+      res.status(500).json({ error: 'Failed to ban user', details: error.message });
+    }
+  });
+
+  app.post('/api/admin/ban-appeal', authMiddleware, adminMiddleware, async (req, res) => {
+    try {
+      const { appealId, status } = req.body;
+      const appeal = await BanAppeal.findByIdAndUpdate(appealId, { status }, { new: true });
+      if (status === 'approved') {
+        await Ban.findOneAndUpdate({ user: appeal.user }, { stage: 0, expiresAt: null });
+        console.log(`Admin approved ban appeal for user ${appeal.user}`);
+      } else {
+        console.log(`Admin rejected ban appeal for user ${appeal.user}`);
+      }
+      res.status(200).json({ message: 'Ban appeal processed successfully' });
+    } catch (error) {
+      console.error('Error in admin ban appeal:', error);
+      res.status(500).json({ error: 'Failed to process ban appeal', details: error.message });
     }
   });
 
@@ -888,6 +1133,7 @@ async function startServer() {
   // Call these functions after connecting to the database
   await createSampleUsers();
   await createDummyPlayers();
+  await createAdminUser();
 
   app.get('/api/user/match-history', authMiddleware, async (req, res) => {
     try {
@@ -915,9 +1161,16 @@ async function startServer() {
     }
   });
 
-  const PORT = process.env.PORT || 3002;
-  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-}
+  const options = {
+    key: fs.readFileSync('path/to/your/key.pem'),
+    cert: fs.readFileSync('path/to/your/cert.pem')
+  };
 
+  const PORT = process.env.PORT || 3002;
+  https.createServer(options, app).listen(PORT, () => {
+    console.log(`HTTPS Server running on port ${PORT}`);
+  });
+  setInterval(checkAndResetBanStage, 24 * 60 * 60 * 1000); // Run once a day
+}
 
 startServer().catch(error => console.error('Failed to start server:', error));
