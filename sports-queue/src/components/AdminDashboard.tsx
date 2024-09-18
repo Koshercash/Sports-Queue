@@ -68,7 +68,7 @@ const AdminDashboard: React.FC = () => {
       setUserId('');
       setBanStage('0');
       setBanReason('');
-      fetchUsers(); // Refresh the user list
+      fetchUsers();
     } catch (error) {
       console.error('Error banning user:', error);
       alert('Failed to ban user. Please check the user ID and try again.');
@@ -83,7 +83,7 @@ const AdminDashboard: React.FC = () => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       alert('User unbanned successfully');
-      fetchUsers(); // Refresh the user list
+      fetchUsers();
     } catch (error) {
       console.error('Error unbanning user:', error);
       alert('Failed to unban user. Please try again.');
@@ -98,7 +98,7 @@ const AdminDashboard: React.FC = () => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       alert('User promoted to admin successfully');
-      fetchUsers(); // Refresh the user list
+      fetchUsers();
     } catch (error) {
       console.error('Error promoting user to admin:', error);
       alert('Failed to promote user to admin. Please try again.');
@@ -137,7 +137,7 @@ const AdminDashboard: React.FC = () => {
             value={userId} 
             onChange={(e) => setUserId(e.target.value)} 
           />
-          <Select onValueChange={setBanStage}>
+          <Select onValueChange={(value: string) => setBanStage(value)}>
             <SelectTrigger>
               <SelectValue placeholder="Select ban stage" />
             </SelectTrigger>
@@ -153,6 +153,7 @@ const AdminDashboard: React.FC = () => {
             placeholder="Ban Reason" 
             value={banReason} 
             onChange={(e) => setBanReason(e.target.value)} 
+            className="mt-2"
           />
           <Button onClick={handleBanUser} className="mt-2">Ban User</Button>
         </div>
