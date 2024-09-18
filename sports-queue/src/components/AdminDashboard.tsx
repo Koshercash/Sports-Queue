@@ -1,16 +1,62 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import axios from 'axios';
 import { API_BASE_URL } from '../config/api';
 
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  isAdmin: boolean;
+  isBanned: boolean;
+}
+
+interface BanAppeal {
+  id: string;
+  userId: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+}
 
 const AdminDashboard: React.FC = () => {
   const [userId, setUserId] = useState('');
   const [banStage, setBanStage] = useState('0');
   const [banReason, setBanReason] = useState('');
-  
+  const [users, setUsers] = useState<User[]>([]);
+  const [banAppeals, setBanAppeals] = useState<BanAppeal[]>([]);
+  const [view, setView] = useState<'ban' | 'users' | 'reports' | 'appeals'>('ban');
+
+  useEffect(() => {
+    fetchUsers();
+    fetchBanAppeals();
+  }, []);
+
+  const fetchUsers = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/api/admin/users`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setUsers(response.data);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+    }
+  };
+
+  const fetchBanAppeals = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.get(`${API_BASE_URL}/api/admin/ban-appeals`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setBanAppeals(response.data);
+    } catch (error) {
+      console.error('Error fetching ban appeals:', error);
+    }
+  };
+
   const handleBanUser = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -19,47 +65,147 @@ const AdminDashboard: React.FC = () => {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       alert('User banned successfully');
+      setUserId('');
+      setBanStage('0');
+      setBanReason('');
+      fetchUsers(); // Refresh the user list
     } catch (error) {
       console.error('Error banning user:', error);
-      alert('Failed to ban user');
+      alert('Failed to ban user. Please check the user ID and try again.');
+    }
+  };
+
+  const handleUnbanUser = async (userId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API_BASE_URL}/api/admin/unban`, 
+        { userId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      alert('User unbanned successfully');
+      fetchUsers(); // Refresh the user list
+    } catch (error) {
+      console.error('Error unbanning user:', error);
+      alert('Failed to unban user. Please try again.');
+    }
+  };
+
+  const handlePromoteToAdmin = async (userId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API_BASE_URL}/api/admin/promote`, 
+        { userId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      alert('User promoted to admin successfully');
+      fetchUsers(); // Refresh the user list
+    } catch (error) {
+      console.error('Error promoting user to admin:', error);
+      alert('Failed to promote user to admin. Please try again.');
+    }
+  };
+
+  const handleAppealAction = async (appealId: string, action: 'approve' | 'reject') => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API_BASE_URL}/api/admin/ban-appeal/${appealId}`, 
+        { action },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      alert(`Ban appeal ${action}ed successfully`);
+      fetchBanAppeals();
+    } catch (error) {
+      console.error('Error handling ban appeal:', error);
+      alert('Failed to process ban appeal');
     }
   };
 
   return (
     <div className="space-y-4">
-      <div>
-        <h4 className="text-lg font-semibold mb-2">Ban User</h4>
-        <Input 
-          placeholder="User ID" 
-          value={userId} 
-          onChange={(e) => setUserId(e.target.value)} 
-        />
-        <Select onValueChange={setBanStage}>
-          <SelectTrigger className="w-full mt-2">
-            <SelectValue placeholder="Select ban stage" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="0">Warning</SelectItem>
-            <SelectItem value="1">1 Day Ban</SelectItem>
-            <SelectItem value="2">7 Day Ban</SelectItem>
-            <SelectItem value="3">30 Day Ban</SelectItem>
-            <SelectItem value="4">Permanent Ban</SelectItem>
-          </SelectContent>
-        </Select>
-        <Input 
-          placeholder="Ban Reason" 
-          value={banReason} 
-          onChange={(e) => setBanReason(e.target.value)} 
-          className="mt-2"
-        />
-        <Button onClick={handleBanUser} className="mt-2">Ban User</Button>
+      <div className="flex space-x-2 mb-4">
+        <Button onClick={() => setView('ban')}>Ban User</Button>
+        <Button onClick={() => setView('users')}>Manage Users</Button>
+        <Button onClick={() => setView('reports')}>View Reports</Button>
+        <Button onClick={() => setView('appeals')}>Ban Appeals</Button>
       </div>
-      <div>
-        <h4 className="text-lg font-semibold mb-2">Other Admin Actions</h4>
-        <Button className="mr-2">Manage Users</Button>
-        <Button className="mr-2">View Reports</Button>
-        <Button>System Settings</Button>
-      </div>
+
+      {view === 'ban' && (
+        <div>
+          <h4 className="text-lg font-semibold mb-2">Ban User</h4>
+          <Input 
+            placeholder="User ID" 
+            value={userId} 
+            onChange={(e) => setUserId(e.target.value)} 
+          />
+          <Select onValueChange={setBanStage}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select ban stage" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="0">Warning</SelectItem>
+              <SelectItem value="1">1 Day Ban</SelectItem>
+              <SelectItem value="2">7 Day Ban</SelectItem>
+              <SelectItem value="3">30 Day Ban</SelectItem>
+              <SelectItem value="4">Permanent Ban</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input 
+            placeholder="Ban Reason" 
+            value={banReason} 
+            onChange={(e) => setBanReason(e.target.value)} 
+          />
+          <Button onClick={handleBanUser} className="mt-2">Ban User</Button>
+        </div>
+      )}
+
+      {view === 'users' && (
+        <div>
+          <h4 className="text-lg font-semibold mb-2">Manage Users</h4>
+          <ul>
+            {users.map(user => (
+              <li key={user.id} className="mb-2 flex items-center justify-between">
+                <span>{user.name} ({user.email}) - ID: {user.id}</span>
+                <div>
+                  {user.isBanned ? (
+                    <Button onClick={() => handleUnbanUser(user.id)} className="mr-2">Unban</Button>
+                  ) : null}
+                  {!user.isAdmin ? (
+                    <Button onClick={() => handlePromoteToAdmin(user.id)}>Promote to Admin</Button>
+                  ) : (
+                    <span className="text-green-500 font-bold">Admin</span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {view === 'reports' && (
+        <div>
+          <h4 className="text-lg font-semibold mb-2">View Reports</h4>
+          <p>Report functionality to be implemented.</p>
+        </div>
+      )}
+
+      {view === 'appeals' && (
+        <div>
+          <h4 className="text-lg font-semibold mb-2">Ban Appeals</h4>
+          {banAppeals.map(appeal => (
+            <div key={appeal.id} className="mb-4 p-2 border rounded">
+              <p>User ID: {appeal.userId}</p>
+              <p>Reason: {appeal.reason}</p>
+              <p>Status: {appeal.status}</p>
+              {appeal.status === 'pending' && (
+                <div className="mt-2">
+                  <Button onClick={() => handleAppealAction(appeal.id, 'approve')} className="mr-2">Approve</Button>
+                  <Button onClick={() => handleAppealAction(appeal.id, 'reject')}>Reject</Button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

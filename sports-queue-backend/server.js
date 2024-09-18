@@ -438,35 +438,53 @@ app.post('/api/admin/ban-appeal', authMiddleware, adminMiddleware, async (req, r
     res.status(500).json({ error: 'Failed to process ban appeal', details: error.message });
   }
 });
-  
-  app.post('/api/admin/ban', authMiddleware, adminMiddleware, validateInput(banSchema), async (req, res) => {
-    try {
-      const { userId, banStage, reason } = req.body;
-      await progressBanStage(userId, banStage === 4);
-      console.log(`Admin manually banned user ${userId} to stage ${banStage}. Reason: ${reason}`);
-      res.status(200).json({ message: 'User banned successfully' });
-    } catch (error) {
-      console.error('Error in admin ban:', error);
-      res.status(500).json({ error: 'Failed to ban user', details: error.message });
-    }
-  });
 
-  app.post('/api/admin/ban-appeal', authMiddleware, adminMiddleware, async (req, res) => {
-    try {
-      const { appealId, status } = req.body;
-      const appeal = await BanAppeal.findByIdAndUpdate(appealId, { status }, { new: true });
-      if (status === 'approved') {
-        await Ban.findOneAndUpdate({ user: appeal.user }, { stage: 0, expiresAt: null });
-        console.log(`Admin approved ban appeal for user ${appeal.user}`);
-      } else {
-        console.log(`Admin rejected ban appeal for user ${appeal.user}`);
-      }
-      res.status(200).json({ message: 'Ban appeal processed successfully' });
-    } catch (error) {
-      console.error('Error in admin ban appeal:', error);
-      res.status(500).json({ error: 'Failed to process ban appeal', details: error.message });
-    }
-  });
+// Add this new endpoint for fetching admin users
+app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const users = await User.find({}, 'name email isAdmin');
+    const usersWithBanStatus = await Promise.all(users.map(async (user) => {
+      const ban = await Ban.findOne({ user: user._id });
+      return {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        isAdmin: user.isAdmin || false,
+        isBanned: !!ban
+      };
+    }));
+    res.json(usersWithBanStatus);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// New endpoint for unbanning a user
+app.post('/api/admin/unban', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    await Ban.findOneAndDelete({ user: userId });
+    console.log(`Admin unbanned user ${userId}`);
+    res.status(200).json({ message: 'User unbanned successfully' });
+  } catch (error) {
+    console.error('Error in admin unban:', error);
+    res.status(500).json({ error: 'Failed to unban user', details: error.message });
+  }
+});
+
+// New endpoint for promoting a user to admin
+app.post('/api/admin/promote', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { userId } = req.body;
+    await User.findByIdAndUpdate(userId, { isAdmin: true });
+    console.log(`Admin promoted user ${userId} to admin`);
+    res.status(200).json({ message: 'User promoted to admin successfully' });
+  } catch (error) {
+    console.error('Error in admin promote:', error);
+    res.status(500).json({ error: 'Failed to promote user', details: error.message });
+  }
+});
 
   // Add a new endpoint to update the user's bio
   app.put('/api/user/bio', authMiddleware, async (req, res) => {
