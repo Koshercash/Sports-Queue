@@ -33,7 +33,10 @@ const MatchHistory: React.FC<MatchHistoryProps> = ({ matches, currentUserId, onP
               </span>
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-3">
+          <CardContent className="p-3 relative">
+            <div className={`absolute top-0 right-0 p-2 text-3xl font-bold ${match.mmrChange > 0 ? 'text-green-500' : 'text-red-500'}`}>
+              {match.mmrChange > 0 ? 'Win' : 'Loss'}
+            </div>
             <p className="text-base mb-2 text-center font-semibold">{match.location}</p>
             <div className="flex justify-center items-center mb-4">
               <span className="text-5xl font-bold text-blue-600 mr-4">{match.blueScore}</span>
