@@ -187,6 +187,7 @@ export default function MainScreen() {
         setIsGameInProgress(true);
         setLobbyTime(parsedGameState.lobbyTime || 0);
         setQueueStatus('matched');
+        console.log('Game state updated for return to game');
       } else {
         console.log('No valid game to return to');
         clearGameState();
@@ -208,13 +209,12 @@ export default function MainScreen() {
   };
 
   const toggleQueue = async () => {
-    const savedGameState = localStorage.getItem('gameState');
-    if (savedGameState) {
-      const parsedGameState = JSON.parse(savedGameState);
-      if (parsedGameState.gameState === 'inGame' && parsedGameState.match) {
-        handleReturnToGame();
-        return;
-      }
+    console.log('Toggle Queue called. Current state:', { queueStatus, isGameInProgress, gameState });
+    
+    if (isGameInProgress) {
+      console.log('Game in progress, returning to game');
+      handleReturnToGame();
+      return;
     }
 
     await checkPenaltyStatus();
@@ -234,22 +234,28 @@ export default function MainScreen() {
         );
         console.log('Queue join response:', response.data);
         if (response.data.match) {
+          console.log('Match found:', response.data.match);
           setQueueStatus('matched');
           setMatch(response.data.match);
           setGameState('loading');
+          setIsGameInProgress(true);
+          
+          const gameStateToSave = {
+            gameState: 'lobby',
+            match: response.data.match,
+            mode: gameMode,
+            lobbyTime: 0,
+            gameEnded: false,
+            savedAt: new Date().toISOString()
+          };
+          console.log('Saving game state:', gameStateToSave);
+          localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
+          
           setTimeout(() => {
+            console.log('Setting game state to inGame');
             setGameState('inGame');
             setInGame(true);
-            setIsGameInProgress(true);
             setLobbyTime(0);
-            localStorage.setItem('gameState', JSON.stringify({
-              gameState: 'inGame',
-              match: response.data.match,
-              mode: gameMode,
-              lobbyTime: 0,
-              gameEnded: false,
-              savedAt: new Date().toISOString()
-            }));
           }, 3000);
         } else {
           setQueueStatus('queuing');
@@ -794,6 +800,10 @@ export default function MainScreen() {
   };
 
   useEffect(() => {
+    console.log('Current user in UserContext:', user);
+  }, [user]);
+
+  useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
       try {
@@ -1175,12 +1185,12 @@ export default function MainScreen() {
               <div className="fixed bottom-8 left-0 right-0 flex flex-col items-center space-y-4 z-30">
                 <Button 
                   className="w-64 h-16 text-2xl bg-green-500 hover:bg-green-600 text-white border-2 border-black"
-                  onClick={toggleQueue}
-                  disabled={gameState === 'loading' || isPenalized || (!isGameInProgress && queueStatus === 'matched')}
+                  onClick={isGameInProgress ? handleReturnToGame : toggleQueue}
+                  disabled={gameState === 'loading' || isPenalized}
                 >
-                  {inGame ? 'Return to Game' :
+                  {isGameInProgress ? 'Return to Game' :
                    queueStatus === 'idle' ? 'Play' : 
-                   queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!'}
+                   queueStatus === 'queuing' ? `Queuing${dots}` : 'Enter Game'}
                 </Button>
                 <Button 
                   variant="outline" 

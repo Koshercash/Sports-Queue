@@ -12,10 +12,11 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { Label } from "@/components/ui/label"
 import { useGameState } from '@/components/GameStateProvider'  // Import useGameState
+import { InteractableProfilePicture } from '../../components/InteractableProfilePicture';
+import { API_BASE_URL } from '../../config/api';
 
 // If useGameState and API_BASE_URL are not available, you'll need to create these
 // For now, let's create placeholder versions:
-const API_BASE_URL = 'http://localhost:3000/api'; // Replace with your actual API URL
 
 interface MatchPlayer {
   id: string;
@@ -76,10 +77,13 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   };
 
   useEffect(() => {
+    console.log('GameScreen mounted. Initial match:', initialMatch);
+    
     // Load game state from localStorage on component mount
     const savedGameState = localStorage.getItem('gameState');
     if (savedGameState) {
       const parsedGameState = JSON.parse(savedGameState);
+      console.log('Loaded game state:', parsedGameState);
       setGameState({
         ...parsedGameState,
         gameState: parsedGameState.gameState || 'lobby',
@@ -87,10 +91,11 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       });
       setLobbyTime(parsedGameState.lobbyTime || 0);
       if (parsedGameState.match) {
-        setMatch(parsedGameState.match); // Set match from saved state
+        console.log('Setting match from saved state:', parsedGameState.match);
+        setMatch(parsedGameState.match);
       }
     } else {
-      // Initialize new game state
+      console.log('No saved game state found, initializing new state');
       setGameState({
         gameState: 'lobby',
         totalGameTime: 0,
@@ -108,7 +113,11 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
     // Start the lobby timer
     const timer = setInterval(() => {
-      setLobbyTime(prevTime => prevTime + 1);
+      setLobbyTime(prevTime => {
+        const newTime = prevTime + 1;
+        console.log('Updating lobby time:', newTime);
+        return newTime;
+      });
       setGameState((prevState: any) => ({
         ...prevState,
         lobbyTime: prevState.lobbyTime + 1
@@ -117,49 +126,27 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
     // Clear the timer when the component unmounts
     return () => clearInterval(timer);
-  }, []);
+  }, [initialMatch]);
 
   useEffect(() => {
-    // Save game state to localStorage whenever it changes
-    localStorage.setItem('gameState', JSON.stringify({
-      ...gameState,
-      mode: gameMode,
-      match: match,
-    }));
-  }, [gameState, gameMode, match]);
+    console.log('Current match state:', match);
+  }, [match]);
 
   const handleBackClick = () => {
     console.log('Back button clicked');
-    // Save the current state before going back
-    const gameStateToSave = {
+    const currentGameState = {
       ...gameState,
-      mode: gameMode,
+      lobbyTime: lobbyTime,
       match: match,
-      isReturning: true,
+      gameMode: gameMode
     };
-    console.log('Saving game state:', gameStateToSave);
-    localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
+    localStorage.setItem('gameState', JSON.stringify(currentGameState));
     onBackFromGame();
   };
 
   const handleLeaveGameClick = () => {
     if (gameState.gameState === 'ended') {
-      // If the game has ended, clear the game state and return to main
-      localStorage.removeItem('gameState');
-      setGameState({
-        gameState: 'lobby',
-        totalGameTime: 0,
-        gameTime: 0,
-        reportScoreTime: 0,
-        blueScore: 0,
-        redScore: 0,
-        halfTimeOccurred: false,
-        isReady: false,
-        readyCount: 0,
-        gameStartTime: null,
-        lobbyTime: 0,
-      });
-      onBackFromGame(true); // Pass true to indicate the game has ended
+      onBackFromGame(true);
       return;
     }
 
@@ -167,7 +154,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     const timeDifference = gameState.gameStartTime ? (now.getTime() - gameState.gameStartTime.getTime()) / (1000 * 60) : 0;
     
     let warningMessage = '';
-    if (gameState.lobbyTime >= 8 && timeDifference <= 20 && gameState.gameState !== 'ended') {
+    if (lobbyTime >= 8 && timeDifference <= 20 && gameState.gameState !== 'ended') {
       warningMessage = 'Warning: Leaving the game now may result in a penalty.';
     }
 
@@ -196,55 +183,6 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     onBackFromGame(true); // Pass true to indicate we're leaving the game
   };
 
-  const getPositionStyle = (position: string, team: 'blue' | 'red', index: number, totalPlayers: number) => {
-    const baseStyle = "absolute transform -translate-x-1/2 -translate-y-1/2";
-    const teamColor = team === 'blue' ? 'border-blue-500' : 'border-red-500';
-    const isBlueTeam = team === 'blue';
-    
-    if (gameMode === '5v5') {
-      switch (position) {
-        case 'goalkeeper': return `${baseStyle} ${isBlueTeam ? 'left-[5%]' : 'left-[95%]'} top-1/2 ${teamColor}`;
-        case 'defender': return `${baseStyle} ${isBlueTeam ? 'left-[20%]' : 'left-[80%]'} ${index % 2 === 0 ? 'top-[30%]' : 'top-[70%]'} ${teamColor}`;
-        case 'midfielder': return `${baseStyle} ${isBlueTeam ? 'left-[35%]' : 'left-[65%]'} top-1/2 ${teamColor}`;
-        case 'striker': return `${baseStyle} ${isBlueTeam ? 'left-[45%]' : 'left-[55%]'} top-1/2 ${teamColor}`;
-        default: return `${baseStyle} ${isBlueTeam ? 'left-[30%]' : 'left-[70%]'} top-1/2 ${teamColor}`;
-      }
-    } else {
-      // 11v11 positioning
-      const positions = {
-        goalkeeper: [{ x: 5, y: 50 }],
-        defender: [
-          { x: 15, y: 20 },
-          { x: 15, y: 40 },
-          { x: 15, y: 60 },
-          { x: 15, y: 80 },
-        ],
-        midfielder: [
-          { x: 30, y: 25 },
-          { x: 30, y: 50 },
-          { x: 30, y: 75 },
-        ],
-        striker: [
-          { x: 40, y: 33 },
-          { x: 40, y: 66 },
-        ],
-      };
-
-      let pos = positions[position as keyof typeof positions] || [{ x: 25, y: 50 }];
-      let { x, y } = pos[index % pos.length];
-
-      if (!isBlueTeam) {
-        x = 100 - x;
-      }
-
-      // Ensure players stay within field boundaries
-      x = Math.max(2, Math.min(98, x));
-      y = Math.max(5, Math.min(95, y));
-
-      return `${baseStyle} left-[${x}%] top-[${y}%] ${teamColor}`;
-    }
-  };
-
   const handleSendMessage = () => {
     if (newMessage.trim()) {
       const currentPlayer = players.find(p => p.id === currentUserId);
@@ -260,9 +198,12 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   const handlePlayerClick = async (player: MatchPlayer) => {
     try {
       const token = localStorage.getItem('token');
+      console.log('Token:', token ? 'exists' : 'not found');
+      console.log('Fetching profile for player:', player.id);
       const response = await axios.get<UserProfileData>(`${API_BASE_URL}/api/user/${player.id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      console.log('Profile data received:', response.data);
       const profileData = {
         ...response.data,
         profilePicture: response.data.profilePicture
@@ -275,6 +216,10 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       setSelectedProfile(profileData);
     } catch (error) {
       console.error('Failed to fetch user profile:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Error response:', error.response?.data);
+        console.error('Error status:', error.response?.status);
+      }
       alert('Failed to load user profile. Please try again.');
     }
   };
@@ -325,11 +270,11 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
   const getPlayerImage = (player: MatchPlayer) => {
     if (player.profilePicture) {
-      return player.profilePicture.startsWith('http') 
-        ? player.profilePicture 
+      return player.profilePicture.startsWith('http')
+        ? player.profilePicture
         : `${API_BASE_URL}${player.profilePicture}`;
     }
-    return null;
+    return '/images/default-avatar.jpg'; // Make sure this file exists in your public folder
   };
 
   const positionOrder = ['goalkeeper', 'defender', 'midfielder', 'striker'];
@@ -463,21 +408,13 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
             <div className={`absolute ${userPlayer.team === 'blue' ? 'left-1/4' : 'right-1/4'} inset-y-0 transform ${userPlayer.team === 'blue' ? '-translate-x-1/2' : 'translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
               <p className="text-4xl font-bold text-white mb-2">Position:</p>
               <div className={`w-48 h-48 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative`}>
-                <div className="w-full h-full relative">
-                  {userPlayer.profilePicture ? (
-                    <Image
-                      src={getPlayerImage(userPlayer) || ''}
-                      alt={userPlayer.name}
-                      layout="fill"
-                      objectFit="cover"
-                      className="rounded-full"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gray-200 text-5xl font-bold">
-                      {userPlayer.name.charAt(0)}
-                    </div>
-                  )}
-                </div>
+                <Image
+                  src={getPlayerImage(userPlayer)}
+                  alt={userPlayer.name}
+                  layout="fill"
+                  objectFit="cover"
+                  className="rounded-full"
+                />
               </div>
               <p className="text-4xl font-bold text-white">{userPlayer.position}</p>
             </div>
@@ -661,11 +598,11 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <h4 className="font-semibold text-blue-600 mb-1">Blue Team</h4>
                     <ScrollArea className="h-full">
                       <ul className="space-y-2">
-                        {blueTeam.map((player) => (
+                        {match && match.team1.map((player) => (
                           <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden">
                               <Image
-                                src={getPlayerImage(player) || ''}
+                                src={getPlayerImage(player)}
                                 alt={player.name}
                                 width={40}
                                 height={40}
@@ -683,11 +620,11 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <h4 className="font-semibold text-red-600 mb-1">Red Team</h4>
                     <ScrollArea className="h-full">
                       <ul className="space-y-2">
-                        {redTeam.map((player) => (
+                        {match && match.team2.map((player) => (
                           <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden">
                               <Image
-                                src={getPlayerImage(player) || ''}
+                                src={getPlayerImage(player)}
                                 alt={player.name}
                                 width={40}
                                 height={40}
