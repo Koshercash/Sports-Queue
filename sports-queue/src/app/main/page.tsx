@@ -843,7 +843,7 @@ export default function MainScreen() {
         {showAdminPanel && isAdmin && <AdminDashboard />}
         
         <Tabs defaultValue="home" onValueChange={handleTabChange}>
-          <TabsList className="grid w-full grid-cols-6 mb-4">
+          <TabsList className="grid w-full grid-cols-5 mb-4">
             <TabsTrigger value="home">Home</TabsTrigger>
             <TabsTrigger value="profile">Profile</TabsTrigger>
             <TabsTrigger value="recent">Recent Games</TabsTrigger>
@@ -856,13 +856,11 @@ export default function MainScreen() {
                 </span>
               )}
             </TabsTrigger>
-            {isAdmin && <TabsTrigger value="admin">Admin</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="home">
             <Card>
               <CardHeader>
-                <CardTitle>Home</CardTitle>
                 <CardTitle>Welcome to Sports Queue</CardTitle>
                 <CardDescription>Your home for organizing and joining sports games</CardDescription>
               </CardHeader>
@@ -1158,19 +1156,6 @@ export default function MainScreen() {
               </CardContent>
             </Card>
           </TabsContent>
-          {isAdmin && (
-            <TabsContent value="admin">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Admin Panel</CardTitle>
-                  <CardDescription>Manage users and system settings</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <AdminDashboard />
-                </CardContent>
-              </Card>
-            </TabsContent>
-          )}
         </Tabs>
       </main>
 
