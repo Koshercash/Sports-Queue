@@ -5,7 +5,7 @@ import axios from 'axios'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ArrowLeft, Check, AlertCircle } from 'lucide-react'
+import { ArrowLeft, Check, AlertCircle, User } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { UserProfile } from '@/components/UserProfile'
 import Image from 'next/image'
@@ -66,6 +66,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   const [reportedPlayer, setReportedPlayer] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState<string | null>(null);
   const [lobbyTime, setLobbyTime] = useState(0);
+  const [userPlayer, setUserPlayer] = useState<MatchPlayer | null>(null);
 
   const players = match ? [...match.team1, ...match.team2] : [];
 
@@ -80,19 +81,19 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     console.log('GameScreen mounted. Initial match:', initialMatch);
     
     // Load game state from localStorage on component mount
-    const savedGameState = localStorage.getItem('gameState');
-    if (savedGameState) {
-      const parsedGameState = JSON.parse(savedGameState);
-      console.log('Loaded game state:', parsedGameState);
+    const savedGameStateString = localStorage.getItem('gameState');
+    if (savedGameStateString) {
+      const savedGameState = JSON.parse(savedGameStateString);
+      console.log('Loaded game state:', savedGameState);
       setGameState({
-        ...parsedGameState,
-        gameState: parsedGameState.gameState || 'lobby',
-        lobbyTime: parsedGameState.lobbyTime || 0,
+        ...savedGameState,
+        gameState: savedGameState.gameState || 'lobby',
+        lobbyTime: savedGameState.lobbyTime || 0,
       });
-      setLobbyTime(parsedGameState.lobbyTime || 0);
-      if (parsedGameState.match) {
-        console.log('Setting match from saved state:', parsedGameState.match);
-        setMatch(parsedGameState.match);
+      setLobbyTime(savedGameState.lobbyTime || 0);
+      if (savedGameState.match) {
+        console.log('Setting match from saved state:', savedGameState.match);
+        setMatch(savedGameState.match);
       }
     } else {
       console.log('No saved game state found, initializing new state');
@@ -112,15 +113,13 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     }
 
     // Start the lobby timer
+    const startTime = Date.now() - (savedGameStateString ? JSON.parse(savedGameStateString).lobbyTime || 0 : 0) * 1000;
     const timer = setInterval(() => {
-      setLobbyTime(prevTime => {
-        const newTime = prevTime + 1;
-        console.log('Updating lobby time:', newTime);
-        return newTime;
-      });
+      const elapsedTime = Math.floor((Date.now() - startTime) / 1000);
+      setLobbyTime(elapsedTime);
       setGameState((prevState: any) => ({
         ...prevState,
-        lobbyTime: prevState.lobbyTime + 1
+        lobbyTime: elapsedTime
       }));
     }, 1000);
 
@@ -132,13 +131,22 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     console.log('Current match state:', match);
   }, [match]);
 
+  useEffect(() => {
+    if (match) {
+      const foundPlayer = [...match.team1, ...match.team2].find(p => p.id === currentUserId);
+      console.log('Found user player:', foundPlayer);
+      setUserPlayer(foundPlayer || null);
+    }
+  }, [match, currentUserId]);
+
   const handleBackClick = () => {
     console.log('Back button clicked');
     const currentGameState = {
       ...gameState,
       lobbyTime: lobbyTime,
       match: match,
-      gameMode: gameMode
+      gameMode: gameMode,
+      lastUpdated: Date.now()
     };
     localStorage.setItem('gameState', JSON.stringify(currentGameState));
     onBackFromGame();
@@ -274,7 +282,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
         ? player.profilePicture
         : `${API_BASE_URL}${player.profilePicture}`;
     }
-    return '/images/default-avatar.jpg'; // Make sure this file exists in your public folder
+    return '/default-avatar.jpg'; // Return a default avatar image path
   };
 
   const positionOrder = ['goalkeeper', 'defender', 'midfielder', 'striker'];
@@ -284,8 +292,6 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
   const blueTeam = sortedPlayers.filter(p => p.team === 'blue');
   const redTeam = sortedPlayers.filter(p => p.team === 'red');
-
-  const userPlayer = players.find(p => p.id === currentUserId);
 
   // Function to get the field location (this is a placeholder, replace with actual logic)
   const getFieldLocation = () => {
@@ -408,13 +414,19 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
             <div className={`absolute ${userPlayer.team === 'blue' ? 'left-1/4' : 'right-1/4'} inset-y-0 transform ${userPlayer.team === 'blue' ? '-translate-x-1/2' : 'translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
               <p className="text-4xl font-bold text-white mb-2">Position:</p>
               <div className={`w-48 h-48 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative`}>
-                <Image
-                  src={getPlayerImage(userPlayer)}
-                  alt={userPlayer.name}
-                  layout="fill"
-                  objectFit="cover"
-                  className="rounded-full"
-                />
+                {userPlayer.profilePicture ? (
+                  <Image
+                    src={getPlayerImage(userPlayer)}
+                    alt={userPlayer.name}
+                    layout="fill"
+                    objectFit="cover"
+                    className="rounded-full"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-gray-200 flex items-center justify-center">
+                    <User className="text-gray-400" size={64} />
+                  </div>
+                )}
               </div>
               <p className="text-4xl font-bold text-white">{userPlayer.position}</p>
             </div>
@@ -592,22 +604,25 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
           {showPlayerList && (
             <div className={`bg-white rounded-lg shadow-lg ${showChat ? 'w-1/2' : 'w-full'}`}>
               <div className="h-64 p-4">
-                <h3 className="font-bold mb-2">Players</h3>
-                <div className="flex h-[calc(100%-2rem)]">
+                <div className="flex h-full">
                   <div className="w-1/2 pr-2">
-                    <h4 className="font-semibold text-blue-600 mb-1">Blue Team</h4>
-                    <ScrollArea className="h-full">
+                    <h4 className="font-semibold text-blue-600 mb-2">Blue Team</h4>
+                    <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
                         {match && match.team1.map((player) => (
                           <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
-                            <div className="w-10 h-10 rounded-full overflow-hidden">
-                              <Image
-                                src={getPlayerImage(player)}
-                                alt={player.name}
-                                width={40}
-                                height={40}
-                                className="object-cover w-full h-full"
-                              />
+                            <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
+                              {player.profilePicture ? (
+                                <Image
+                                  src={getPlayerImage(player)}
+                                  alt={player.name}
+                                  width={40}
+                                  height={40}
+                                  className="object-cover w-full h-full"
+                                />
+                              ) : (
+                                <User className="text-gray-400" size={24} />
+                              )}
                             </div>
                             <span className="text-blue-600">{player.name}</span>
                             <span className="text-sm text-gray-500">({player.position})</span>
@@ -617,19 +632,23 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     </ScrollArea>
                   </div>
                   <div className="w-1/2 pl-2 border-l">
-                    <h4 className="font-semibold text-red-600 mb-1">Red Team</h4>
-                    <ScrollArea className="h-full">
+                    <h4 className="font-semibold text-red-600 mb-2">Red Team</h4>
+                    <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
                         {match && match.team2.map((player) => (
                           <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
-                            <div className="w-10 h-10 rounded-full overflow-hidden">
-                              <Image
-                                src={getPlayerImage(player)}
-                                alt={player.name}
-                                width={40}
-                                height={40}
-                                className="object-cover w-full h-full"
-                              />
+                            <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
+                              {player.profilePicture ? (
+                                <Image
+                                  src={getPlayerImage(player)}
+                                  alt={player.name}
+                                  width={40}
+                                  height={40}
+                                  className="object-cover w-full h-full"
+                                />
+                              ) : (
+                                <User className="text-gray-400" size={24} />
+                              )}
                             </div>
                             <span className="text-red-600">{player.name}</span>
                             <span className="text-sm text-gray-500">({player.position})</span>

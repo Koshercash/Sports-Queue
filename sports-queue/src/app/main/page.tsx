@@ -688,13 +688,27 @@ export default function MainScreen() {
   }, [router]);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let timer: NodeJS.Timeout;
     if (isGameInProgress && !inGame) {
-      interval = setInterval(() => {
-        setLobbyTime(prevTime => prevTime + 1);
+      const savedGameState = localStorage.getItem('gameState');
+      if (savedGameState) {
+        const parsedGameState = JSON.parse(savedGameState);
+        const elapsedTime = Math.floor((Date.now() - parsedGameState.lastUpdated) / 1000);
+        setLobbyTime(parsedGameState.lobbyTime + elapsedTime);
+      }
+
+      timer = setInterval(() => {
+        setLobbyTime(prevTime => {
+          const newTime = prevTime + 1;
+          const updatedGameState = JSON.parse(localStorage.getItem('gameState') || '{}');
+          updatedGameState.lobbyTime = newTime;
+          updatedGameState.lastUpdated = Date.now();
+          localStorage.setItem('gameState', JSON.stringify(updatedGameState));
+          return newTime;
+        });
       }, 1000);
     }
-    return () => clearInterval(interval);
+    return () => clearInterval(timer);
   }, [isGameInProgress, inGame]);
 
   useEffect(() => {
