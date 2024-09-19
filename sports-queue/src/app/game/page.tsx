@@ -11,13 +11,10 @@ import { UserProfile } from '@/components/UserProfile'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { Label } from "@/components/ui/label"
+import { useGameState } from '@/components/GameStateProvider'  // Import useGameState
 
 // If useGameState and API_BASE_URL are not available, you'll need to create these
 // For now, let's create placeholder versions:
-const useGameState = () => {
-  const [gameState, setGameState] = useState({} as any);
-  return { gameState, setGameState };
-};
 const API_BASE_URL = 'http://localhost:3000/api'; // Replace with your actual API URL
 
 interface MatchPlayer {
@@ -54,9 +51,10 @@ interface UserProfileData {
   cityTown: string;
 }
 
-export default function GameScreen({ match, gameMode, onBackFromGame, currentUserId }: GameScreenProps) {
+export default function GameScreen({ match: initialMatch, gameMode, onBackFromGame, currentUserId }: GameScreenProps) {
   const router = useRouter();
   const { gameState, setGameState } = useGameState();
+  const [match, setMatch] = useState<Match | null>(initialMatch);
   const [showChat, setShowChat] = useState(false)
   const [showPlayerList, setShowPlayerList] = useState(false)
   const [chatMessages, setChatMessages] = useState<{ sender: string; message: string; team: 'blue' | 'red' }[]>([])
@@ -84,13 +82,37 @@ export default function GameScreen({ match, gameMode, onBackFromGame, currentUse
       const parsedGameState = JSON.parse(savedGameState);
       setGameState({
         ...parsedGameState,
-        lobbyTime: lobbyTime,
+        gameState: parsedGameState.gameState || 'lobby',
+        lobbyTime: parsedGameState.lobbyTime || 0,
+      });
+      setLobbyTime(parsedGameState.lobbyTime || 0);
+      if (parsedGameState.match) {
+        setMatch(parsedGameState.match); // Set match from saved state
+      }
+    } else {
+      // Initialize new game state
+      setGameState({
+        gameState: 'lobby',
+        totalGameTime: 0,
+        gameTime: 0,
+        reportScoreTime: 0,
+        blueScore: 0,
+        redScore: 0,
+        halfTimeOccurred: false,
+        isReady: false,
+        readyCount: 0,
+        gameStartTime: null,
+        lobbyTime: 0,
       });
     }
 
     // Start the lobby timer
     const timer = setInterval(() => {
       setLobbyTime(prevTime => prevTime + 1);
+      setGameState((prevState: any) => ({
+        ...prevState,
+        lobbyTime: prevState.lobbyTime + 1
+      }));
     }, 1000);
 
     // Clear the timer when the component unmounts
@@ -102,9 +124,9 @@ export default function GameScreen({ match, gameMode, onBackFromGame, currentUse
     localStorage.setItem('gameState', JSON.stringify({
       ...gameState,
       mode: gameMode,
-      players
+      match: match,
     }));
-  }, [gameState, gameMode, players]);
+  }, [gameState, gameMode, match]);
 
   const handleBackClick = () => {
     console.log('Back button clicked');
@@ -112,11 +134,8 @@ export default function GameScreen({ match, gameMode, onBackFromGame, currentUse
     const gameStateToSave = {
       ...gameState,
       mode: gameMode,
-      players,
+      match: match,
       isReturning: true,
-      lobbyTime: lobbyTime,
-      gameStartTime: gameState.gameStartTime,
-      totalGameTime: gameState.totalGameTime,
     };
     console.log('Saving game state:', gameStateToSave);
     localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
