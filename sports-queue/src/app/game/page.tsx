@@ -10,11 +10,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { UserProfile } from '@/components/UserProfile'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { useGameState } from '@/components/GameStateProvider'
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 
-interface Player {
+// If useGameState and API_BASE_URL are not available, you'll need to create these
+// For now, let's create placeholder versions:
+const useGameState = () => {
+  const [gameState, setGameState] = useState({} as any);
+  return { gameState, setGameState };
+};
+const API_BASE_URL = 'http://localhost:3000/api'; // Replace with your actual API URL
+
+interface MatchPlayer {
   id: string;
   name: string;
   position: string;
@@ -22,13 +28,16 @@ interface Player {
   profilePicture?: string | null;
 }
 
+interface Match {
+  team1: MatchPlayer[];
+  team2: MatchPlayer[];
+}
+
 interface GameScreenProps {
-  mode: '5v5' | '11v11';
-  players: Player[];
+  match: Match | null;
+  gameMode: '5v5' | '11v11';
+  onBackFromGame: (gameJustEnded?: boolean) => void;
   currentUserId: string;
-  onBackToMain: (gameJustEnded?: boolean) => void;
-  onLeaveGame: (gameStartTime: Date | null) => Promise<void>;
-  lobbyTime: number;
 }
 
 interface UserProfileData {
@@ -42,10 +51,10 @@ interface UserProfileData {
   mmr5v5: number;
   mmr11v11: number;
   bio: string;
-  cityTown: string; // Added cityTown property
+  cityTown: string;
 }
 
-export default function GameScreen({ mode = '5v5', players, currentUserId, onBackToMain, onLeaveGame, lobbyTime: initialLobbyTime }: GameScreenProps) {
+export default function GameScreen({ match, gameMode, onBackFromGame, currentUserId }: GameScreenProps) {
   const router = useRouter();
   const { gameState, setGameState } = useGameState();
   const [showChat, setShowChat] = useState(false)
@@ -57,6 +66,16 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   const [leaveWarningMessage, setLeaveWarningMessage] = useState('')
   const [reportedPlayer, setReportedPlayer] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState<string | null>(null);
+  const [lobbyTime, setLobbyTime] = useState(0);
+
+  const players = match ? [...match.team1, ...match.team2] : [];
+
+  const onLeaveGame = async (gameStartTime: Date | null) => {
+    console.log('Leaving game', gameStartTime);
+    // Implement the leave game logic here
+    // For now, we'll just call onBackFromGame
+    onBackFromGame(true);
+  };
 
   useEffect(() => {
     // Load game state from localStorage on component mount
@@ -65,16 +84,13 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
       const parsedGameState = JSON.parse(savedGameState);
       setGameState({
         ...parsedGameState,
-        lobbyTime: initialLobbyTime,
+        lobbyTime: lobbyTime,
       });
     }
 
     // Start the lobby timer
     const timer = setInterval(() => {
-      setGameState(prevState => ({
-        ...prevState,
-        lobbyTime: (prevState.lobbyTime || 0) + 1
-      }));
+      setLobbyTime(prevTime => prevTime + 1);
     }, 1000);
 
     // Clear the timer when the component unmounts
@@ -85,26 +101,26 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     // Save game state to localStorage whenever it changes
     localStorage.setItem('gameState', JSON.stringify({
       ...gameState,
-      mode,
+      mode: gameMode,
       players
     }));
-  }, [gameState, mode, players]);
+  }, [gameState, gameMode, players]);
 
   const handleBackClick = () => {
     console.log('Back button clicked');
     // Save the current state before going back
     const gameStateToSave = {
       ...gameState,
-      mode,
+      mode: gameMode,
       players,
       isReturning: true,
-      lobbyTime: gameState.lobbyTime,
+      lobbyTime: lobbyTime,
       gameStartTime: gameState.gameStartTime,
       totalGameTime: gameState.totalGameTime,
     };
     console.log('Saving game state:', gameStateToSave);
     localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
-    onBackToMain();
+    onBackFromGame();
   };
 
   const handleLeaveGameClick = () => {
@@ -124,7 +140,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         gameStartTime: null,
         lobbyTime: 0,
       });
-      onBackToMain(true); // Pass true to indicate the game has ended
+      onBackFromGame(true); // Pass true to indicate the game has ended
       return;
     }
 
@@ -158,7 +174,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
       gameStartTime: null,
       lobbyTime: 0,
     });
-    onBackToMain(true); // Pass true to indicate we're leaving the game
+    onBackFromGame(true); // Pass true to indicate we're leaving the game
   };
 
   const getPositionStyle = (position: string, team: 'blue' | 'red', index: number, totalPlayers: number) => {
@@ -166,7 +182,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     const teamColor = team === 'blue' ? 'border-blue-500' : 'border-red-500';
     const isBlueTeam = team === 'blue';
     
-    if (mode === '5v5') {
+    if (gameMode === '5v5') {
       switch (position) {
         case 'goalkeeper': return `${baseStyle} ${isBlueTeam ? 'left-[5%]' : 'left-[95%]'} top-1/2 ${teamColor}`;
         case 'defender': return `${baseStyle} ${isBlueTeam ? 'left-[20%]' : 'left-[80%]'} ${index % 2 === 0 ? 'top-[30%]' : 'top-[70%]'} ${teamColor}`;
@@ -222,10 +238,10 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     }
   };
 
-  const handlePlayerClick = async (player: Player) => {
+  const handlePlayerClick = async (player: MatchPlayer) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await axios.get<UserProfileData>(`http://localhost:3002/api/user/${player.id}`, {
+      const response = await axios.get<UserProfileData>(`${API_BASE_URL}/api/user/${player.id}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const profileData = {
@@ -233,9 +249,9 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         profilePicture: response.data.profilePicture
           ? response.data.profilePicture.startsWith('http')
             ? response.data.profilePicture
-            : `http://localhost:3002${response.data.profilePicture}`
+            : `${API_BASE_URL}${response.data.profilePicture}`
           : null,
-        cityTown: response.data.cityTown || '' // Added cityTown property
+        cityTown: response.data.cityTown || ''
       };
       setSelectedProfile(profileData);
     } catch (error) {
@@ -248,7 +264,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     if (selectedProfile) {
       try {
         const token = localStorage.getItem('token');
-        await axios.post('http://localhost:3002/api/friends/add', 
+        await axios.post(`${API_BASE_URL}/api/friends/add`, 
           { friendId: selectedProfile.id },
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -269,7 +285,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     if (reportedPlayer && reportReason) {
       try {
         const token = localStorage.getItem('token');
-        await axios.post('http://localhost:3002/api/report-player', 
+        await axios.post(`${API_BASE_URL}/api/report-player`, 
           { 
             reportedPlayerId: reportedPlayer,
             reason: reportReason
@@ -288,11 +304,11 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     }
   };
 
-  const getPlayerImage = (player: Player) => {
+  const getPlayerImage = (player: MatchPlayer) => {
     if (player.profilePicture) {
       return player.profilePicture.startsWith('http') 
         ? player.profilePicture 
-        : `http://localhost:3002${player.profilePicture}`;
+        : `${API_BASE_URL}${player.profilePicture}`;
     }
     return null;
   };
@@ -321,7 +337,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
   const handleReadyUp = () => {
     if (gameState.gameState === 'lobby') {
       const newReadyState = !gameState.isReady;
-      setGameState(prevState => ({
+      setGameState((prevState: any) => ({
         ...prevState,
         isReady: newReadyState,
         readyCount: newReadyState ? prevState.readyCount + 1 : prevState.readyCount - 1,
@@ -334,7 +350,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
   const handleReportScore = () => {
     if (gameState.gameState === 'reportScore') {
-      setGameState(prevState => ({
+      setGameState((prevState: any) => ({
         ...prevState,
         gameState: 'ended',
       }));
@@ -349,7 +365,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
 
   const handleGameEnd = async () => {
     // Update the game state to 'ended'
-    setGameState(prevState => ({
+    setGameState((prevState: any) => ({
       ...prevState,
       gameState: 'ended',
     }));
@@ -358,7 +374,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
     try {
       const token = localStorage.getItem('token');
       const gameResult = {
-        mode: mode,
+        mode: gameMode,
         blueScore: gameState.blueScore,
         redScore: gameState.redScore,
         players: players.map(p => p.id),
@@ -366,7 +382,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         location: fieldLocation.name,
       };
 
-      const response = await axios.post('http://localhost:3002/api/game/result', gameResult, {
+      const response = await axios.post(`${API_BASE_URL}/api/game/result`, gameResult, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -377,11 +393,11 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         gameEnded: true
       }));
 
-      onBackToMain(true); // Pass true to indicate a game just ended
+      onBackFromGame(true); // Pass true to indicate a game just ended
     } catch (error) {
       console.error('Failed to save game result:', error);
       alert('Failed to save game result. The game has ended, but it may not appear in your recent games.');
-      onBackToMain(true);
+      onBackFromGame(true);
     }
   };
 
@@ -409,7 +425,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
             {gameState.gameState === 'ended' ? 'Return to Main' : 'Leave Game'}
           </Button>
         </div>
-        <h1 className="text-5xl font-bold text-center mb-8 text-white">{mode}</h1>
+        <h1 className="text-5xl font-bold text-center mb-8 text-white">{gameMode}</h1>
         
         <div className="w-full h-[60vh] bg-green-800 relative mb-8 rounded-xl overflow-hidden border-4 border-white">
           {/* Simplified soccer field graphic */}
@@ -490,7 +506,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
                       value={gameState.blueScore} 
                       onChange={(e) => {
                         const value = Math.max(0, parseInt(e.target.value) || 0);
-                        setGameState(prevState => ({ ...prevState, blueScore: value }));
+                        setGameState((prevState: any) => ({ ...prevState, blueScore: value }));
                       }}
                       min="0"
                       className="w-24 h-24 text-4xl text-center text-blue-500 bg-white"
@@ -501,7 +517,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
                       value={gameState.redScore} 
                       onChange={(e) => {
                         const value = Math.max(0, parseInt(e.target.value) || 0);
-                        setGameState(prevState => ({ ...prevState, redScore: value }));
+                        setGameState((prevState: any) => ({ ...prevState, redScore: value }));
                       }}
                       min="0"
                       className="w-24 h-24 text-4xl text-center text-red-500 bg-white"
@@ -562,7 +578,7 @@ export default function GameScreen({ mode = '5v5', players, currentUserId, onBac
         <div className="flex justify-between items-center mb-4 bg-white bg-opacity-80 p-2 rounded">
           <p className="font-medium">Current Time: {new Date().toLocaleTimeString()}</p>
           <p className="font-medium">Game Start Time: {gameState.gameStartTime?.toLocaleTimeString()}</p>
-          <p className="font-medium">Lobby Time: {gameState.lobbyTime} seconds</p>
+          <p className="font-medium">Lobby Time: {lobbyTime} seconds</p>
         </div>
 
         <div className="flex space-x-4 mt-4">

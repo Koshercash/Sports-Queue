@@ -46,6 +46,7 @@ interface MatchPlayer {
   id: string;
   name: string;
   position: string;
+  team: 'blue' | 'red';
   profilePicture?: string | null;
 }
 
@@ -63,7 +64,7 @@ interface UserProfileData {
   profilePicture: string | null;
   isCurrentUser: boolean;
   mmr5v5: number;
-  mmr111v11: number;
+  mmr11v11: number;
   bio: string;
   cityTown: string;
 }
@@ -183,38 +184,39 @@ export default function MainScreen() {
     if (savedGameState) {
       const parsedGameState = JSON.parse(savedGameState);
       console.log('Parsed game state:', parsedGameState);
-      if (parsedGameState.isReturning) {
+      if (parsedGameState.gameState === 'inGame' && parsedGameState.match) {
         setInGame(true);
-        setGameState({
-          ...parsedGameState,
-          gameStartTime: parsedGameState.gameStartTime ? new Date(parsedGameState.gameStartTime) : null,
-        });
-        setMatch({
-          team1: parsedGameState.players.filter((p: Player) => p.team === 'blue'),
-          team2: parsedGameState.players.filter((p: Player) => p.team === 'red')
-        });
+        setGameState('inGame');
+        setMatch(parsedGameState.match);
         setGameMode(parsedGameState.mode);
         setIsGameInProgress(true);
         setLobbyTime(parsedGameState.lobbyTime || 0);
         setQueueStatus('matched');
-        
-        localStorage.setItem('gameState', JSON.stringify({
-          ...parsedGameState,
-          isReturning: false
-        }));
       } else {
-        console.log('No game to return to');
+        console.log('No valid game to return to');
+        clearGameState();
       }
     } else {
       console.log('No saved game state found');
+      clearGameState();
     }
+  };
+
+  const clearGameState = () => {
+    localStorage.removeItem('gameState');
+    setQueueStatus('idle');
+    setMatch(null);
+    setGameState('idle');
+    setIsGameInProgress(false);
+    setLobbyTime(0);
+    setInGame(false);
   };
 
   const toggleQueue = async () => {
     const savedGameState = localStorage.getItem('gameState');
     if (savedGameState) {
       const parsedGameState = JSON.parse(savedGameState);
-      if (parsedGameState.isReturning || isGameInProgress) {
+      if (parsedGameState.gameState === 'inGame' && parsedGameState.match) {
         handleReturnToGame();
         return;
       }
@@ -250,7 +252,8 @@ export default function MainScreen() {
               match: response.data.match,
               mode: gameMode,
               lobbyTime: 0,
-              gameEnded: false
+              gameEnded: false,
+              savedAt: new Date().toISOString()
             }));
           }, 3000);
         } else {
@@ -731,18 +734,26 @@ export default function MainScreen() {
     if (savedGameState) {
       const parsedGameState = JSON.parse(savedGameState);
       console.log('Initial load - Parsed game state:', parsedGameState);
-      if (parsedGameState.gameState !== 'ended' && parsedGameState.match) {
+      
+      // Check if the saved state is less than 2 hours old
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      const savedTime = new Date(parsedGameState.savedAt || 0);
+      
+      if (parsedGameState.gameState === 'inGame' && parsedGameState.match && savedTime > twoHoursAgo) {
         setIsGameInProgress(true);
         setGameMode(parsedGameState.mode);
         setMatch(parsedGameState.match);
         setLobbyTime(parsedGameState.lobbyTime);
         setQueueStatus('matched');
+        setGameState('inGame');
+        setInGame(true);
       } else {
-        console.log('Clearing invalid game state');
-        localStorage.removeItem('gameState');
+        console.log('Clearing invalid or old game state');
+        clearGameState();
       }
     } else {
       console.log('No saved game state found on initial load');
+      clearGameState();
     }
   }, []);
 
@@ -783,10 +794,6 @@ export default function MainScreen() {
     }
   }, [leaderboardMode, leaderboardGender, leaderboardSearch]);
 
-  useEffect(() => {
-    fetchLeaderboard();
-  }, [fetchLeaderboard]);
-
   const handleLoadMore = () => {
     fetchLeaderboard(leaderboardPage + 1);
   };
@@ -805,420 +812,430 @@ export default function MainScreen() {
 
   return (
     <div className="min-h-screen bg-white text-black relative overflow-hidden">
-      <header className="relative z-20 flex justify-between items-center p-4 bg-green-500 text-white">
-        <h1 className="text-2xl font-bold">Sports Queue</h1>
-        <div className="flex items-center space-x-2">
-          {isAdmin && (
-            <Button 
-              variant="outline" 
-              className="text-white border-white hover:bg-green-600"
-              onClick={() => setShowAdminPanel(!showAdminPanel)}
-            >
-              Admin
-            </Button>
-          )}
-          <Dialog open={infoDialogOpen} onOpenChange={setInfoDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" className="text-white border-white hover:bg-green-600" onClick={() => setInfoDialogOpen(true)}>Info</Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
-              <DialogHeader>
-                <DialogTitle>Info</DialogTitle>
-                <DialogDescription>
-                  <p>Welcome to Sports Queue!</p>
-                  <p>Here's how it works:</p>
-                  <ol className="list-decimal pl-5">
-                    <li>Click the "Join Queue" button to find a game.</li>
-                    <li>Once you're matched, you'll be taken to the game screen.</li>
-                    <li>Enjoy your game!</li>
-                  </ol>
-                </DialogDescription>
-              </DialogHeader>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </header>
-
-      <main className="relative z-10 p-4 pb-32 overflow-y-auto h-[calc(100vh-180px)]">
-        {showAdminPanel && isAdmin && <AdminDashboard />}
-        
-        <Tabs defaultValue="home" onValueChange={handleTabChange}>
-          <TabsList className="grid w-full grid-cols-5 mb-4">
-            <TabsTrigger value="home">Home</TabsTrigger>
-            <TabsTrigger value="profile">Profile</TabsTrigger>
-            <TabsTrigger value="recent">Recent Games</TabsTrigger>
-            <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
-            <TabsTrigger value="friends" className="relative">
-              Friends
-              {totalNotifications > 0 && !notificationsViewed && (
-                <span className={styles.notificationBadge}>
-                  {totalNotifications}
-                </span>
+      {inGame ? (
+        <GameScreen
+          match={match}
+          gameMode={gameMode}
+          onBackFromGame={handleBackFromGame}
+        />
+      ) : (
+        <>
+          <header className="relative z-20 flex justify-between items-center p-4 bg-green-500 text-white">
+            <h1 className="text-2xl font-bold">Sports Queue</h1>
+            <div className="flex items-center space-x-2">
+              {isAdmin && (
+                <Button 
+                  variant="outline" 
+                  className="text-white border-white hover:bg-green-600"
+                  onClick={() => setShowAdminPanel(!showAdminPanel)}
+                >
+                  Admin
+                </Button>
               )}
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="home">
-            <Card>
-              <CardHeader>
-                <CardTitle>Welcome to Sports Queue</CardTitle>
-                <CardDescription>Your home for organizing and joining sports games</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p>Click the Play button below to join or create a game.</p>
-                <p>Current game mode: {gameMode}</p>
-              </CardContent>
-            </Card>
-          </TabsContent>
-          <TabsContent value="profile">
-            <Card>
-              <CardHeader>
-                <CardTitle>Your Profile</CardTitle>
-                <CardDescription>View and edit your profile information</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {userProfile && (
-                  <>
-                    <Tabs defaultValue="info" className="w-full">
-                      <TabsList className="grid w-full grid-cols-2 mb-6">
-                        <TabsTrigger value="info">Info</TabsTrigger>
-                        <TabsTrigger value="matchHistory">Match History</TabsTrigger>
-                      </TabsList>
-                      <TabsContent value="info">
-                        <UserProfile
-                          {...userProfile}
-                          isCurrentUser={true}
-                          onProfilePictureChange={handleProfilePictureChange}
-                          onBioChange={handleBioChange}
-                        />
-                      </TabsContent>
-                      <TabsContent value="matchHistory">
-                        <MatchHistory matches={matchHistory} currentUserId={userProfile?.id || ''} onPlayerClick={handlePlayerClick} />
-                      </TabsContent>
-                    </Tabs>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-          <TabsContent value="recent">
-            <Card>
-              <CardHeader>
-                <CardTitle>Recent Games Nearby</CardTitle>
-                <CardDescription>Games played within 50 miles of your location</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {geoError ? (
-                  <p>Error fetching location. Please enable location services to see nearby games.</p>
-                ) : (
-                  <div className="space-y-4">
-                    {recentGames.map((game) => (
-                      <Card key={game.id} className="overflow-hidden">
-                        <CardHeader className="bg-gray-100 py-2 px-3">
-                          <CardTitle className="flex justify-between items-center">
-                            <span className="text-base w-1/3">{new Date(game.endTime).toLocaleString()}</span>
-                            <span className="text-lg font-bold w-1/3 text-center -ml-3">{game.mode}</span>
-                            <span className="text-sm font-semibold text-gray-600 w-1/3 text-right">
-                              Avg MMR: {game.averageMMR}
-                            </span>
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="p-3">
-                          <p className="text-base mb-1 text-center font-semibold">{game.location}</p>
-                          <p className="text-sm mb-2 text-center text-gray-600">
-                            {game.distance.toFixed(1)} miles away
-                          </p>
-                          <div className="flex justify-center items-center mb-4">
-                            <span className="text-5xl font-bold text-blue-600 mr-4">{game.blueScore}</span>
-                            <span className="text-3xl font-bold">-</span>
-                            <span className="text-5xl font-bold text-red-600 ml-4">{game.redScore}</span>
-                          </div>
-                          <div>
-                            <p className="text-base font-semibold mb-2">Players:</p>
-                            <div className="flex flex-wrap gap-3 justify-center">
-                              {game.players.map(player => (
-                                <div key={player.id} className="flex flex-col items-center">
-                                  <div className="rounded-full overflow-hidden w-10 h-10">
-                                    <InteractableProfilePicture
-                                      currentImage={player.profilePicture || ''}
-                                      onClick={() => handlePlayerClick(player.id)}
-                                      size="small"
-                                    />
-                                  </div>
-                                  <span className="text-sm mt-1">{player.name}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-          <TabsContent value="leaderboard">
-            <div className="pt-6">
-              <div className="flex justify-between items-center mb-4">
-                <div className="flex space-x-2">
-                  <Tabs defaultValue="5v5" onValueChange={(value) => setLeaderboardMode(value as '5v5' | '11v11')}>
-                    <TabsList className="h-8">
-                      <TabsTrigger value="5v5" className="px-2 py-1 text-sm">5v5</TabsTrigger>
-                      <TabsTrigger value="11v11" className="px-2 py-1 text-sm">11v11</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-                  <Tabs defaultValue="male" onValueChange={(value) => setLeaderboardGender(value as 'male' | 'female')}>
-                    <TabsList className="h-8">
-                      <TabsTrigger value="male" className="px-2 py-1 text-sm">Male</TabsTrigger>
-                      <TabsTrigger value="female" className="px-2 py-1 text-sm">Female</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-                </div>
-                <Input
-                  type="text"
-                  placeholder="Search player"
-                  className="w-48"
-                  value={leaderboardSearch}
-                  onChange={(e) => setLeaderboardSearch(e.target.value)}
-                />
-              </div>
-              <div className="mt-4">
-                <h3 className="text-lg font-semibold mb-2">
-                  Top {leaderboardGender === 'male' ? 'Male' : 'Female'} Players ({leaderboardMode})
-                </h3>
-                <div className="flex space-x-4">
-                  <div className="w-1/2 space-y-2">
-                    {leaderboardPlayers
-                      .filter(player => player.name.toLowerCase().includes(leaderboardSearch.toLowerCase()))
-                      .slice(0, Math.ceil(leaderboardPlayers.length / 2))
-                      .map((player) => (
-                        <div key={player.id} className="flex items-center justify-between bg-white p-2 rounded-lg shadow">
-                          <div className="flex items-center space-x-2">
-                            <span className="text-sm font-semibold w-6 text-right">#{player.rank}</span>
-                            <div className="rounded-full overflow-hidden w-8 h-8">
-                              <InteractableProfilePicture
-                                currentImage={player.profilePicture}
-                                onClick={() => handlePlayerClick(player.id)}
-                                size="small"
-                              />
-                            </div>
-                            <span className="text-sm font-semibold">{player.name}</span>
-                          </div>
-                          <span className="text-sm font-bold text-green-600">MMR: {player.mmr}</span>
-                        </div>
-                      ))}
-                  </div>
-                  <div className="w-1/2 space-y-2">
-                    {leaderboardPlayers
-                      .filter(player => player.name.toLowerCase().includes(leaderboardSearch.toLowerCase()))
-                      .slice(Math.ceil(leaderboardPlayers.length / 2))
-                      .map((player) => (
-                        <div key={player.id} className="flex items-center justify-between bg-white p-2 rounded-lg shadow">
-                          <div className="flex items-center space-x-2">
-                            <span className="text-sm font-semibold w-6 text-right">#{player.rank}</span>
-                            <div className="rounded-full overflow-hidden w-8 h-8">
-                              <InteractableProfilePicture
-                                currentImage={player.profilePicture}
-                                onClick={() => handlePlayerClick(player.id)}
-                                size="small"
-                              />
-                            </div>
-                            <span className="text-sm font-semibold">{player.name}</span>
-                          </div>
-                          <span className="text-sm font-bold text-green-600">MMR: {player.mmr}</span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-                {leaderboardPlayers.length < 1000 && !isLoadingMore && (
-                  <Button 
-                    onClick={handleLoadMore} 
-                    className="w-full mt-4"
-                    disabled={isLoadingMore}
-                  >
-                    Load More
-                  </Button>
-                )}
-                {isLoadingMore && (
-                  <p className="text-center mt-4">Loading more players...</p>
-                )}
-              </div>
+              <Dialog open={infoDialogOpen} onOpenChange={setInfoDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="text-white border-white hover:bg-green-600" onClick={() => setInfoDialogOpen(true)}>Info</Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Info</DialogTitle>
+                    <DialogDescription>
+                      <p>Welcome to Sports Queue!</p>
+                      <p>Here's how it works:</p>
+                      <ol className="list-decimal pl-5">
+                        <li>Click the "Join Queue" button to find a game.</li>
+                        <li>Once you're matched, you'll be taken to the game screen.</li>
+                        <li>Enjoy your game!</li>
+                      </ol>
+                    </DialogDescription>
+                  </DialogHeader>
+                </DialogContent>
+              </Dialog>
             </div>
-          </TabsContent>
-          <TabsContent value="friends" className="h-[calc(100vh-260px)] overflow-y-auto">
-            <Card>
-              <CardHeader>
-                <CardTitle>Friends</CardTitle>
-                <CardDescription>Manage your friends list</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex space-x-2 mb-4">
-                  <Input 
-                    placeholder="Search users" 
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  />
-                  <Button onClick={searchUsers}>Search</Button>
-                  {searchResults.length > 0 && (
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={() => setSearchResults([])}
-                    >
-                      X
-                    </Button>
+          </header>
+
+          <main className="relative z-10 p-4 pb-32 overflow-y-auto h-[calc(100vh-180px)]">
+            {showAdminPanel && isAdmin && <AdminDashboard />}
+            
+            <Tabs defaultValue="home" onValueChange={handleTabChange}>
+              <TabsList className="grid w-full grid-cols-5 mb-4">
+                <TabsTrigger value="home">Home</TabsTrigger>
+                <TabsTrigger value="profile">Profile</TabsTrigger>
+                <TabsTrigger value="recent">Recent Games</TabsTrigger>
+                <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
+                <TabsTrigger value="friends" className="relative">
+                  Friends
+                  {totalNotifications > 0 && !notificationsViewed && (
+                    <span className={styles.notificationBadge}>
+                      {totalNotifications}
+                    </span>
+                  )}
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="home">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Welcome to Sports Queue</CardTitle>
+                    <CardDescription>Your home for organizing and joining sports games</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p>Click the Play button below to join or create a game.</p>
+                    <p>Current game mode: {gameMode}</p>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+              <TabsContent value="profile">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Your Profile</CardTitle>
+                    <CardDescription>View and edit your profile information</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {userProfile && (
+                      <>
+                        <Tabs defaultValue="info" className="w-full">
+                          <TabsList className="grid w-full grid-cols-2 mb-6">
+                            <TabsTrigger value="info">Info</TabsTrigger>
+                            <TabsTrigger value="matchHistory">Match History</TabsTrigger>
+                          </TabsList>
+                          <TabsContent value="info">
+                            <UserProfile
+                              {...userProfile}
+                              isCurrentUser={true}
+                              onProfilePictureChange={handleProfilePictureChange}
+                              onBioChange={handleBioChange}
+                            />
+                          </TabsContent>
+                          <TabsContent value="matchHistory">
+                            <MatchHistory matches={matchHistory} currentUserId={userProfile?.id || ''} onPlayerClick={handlePlayerClick} />
+                          </TabsContent>
+                        </Tabs>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+              <TabsContent value="recent">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Recent Games Nearby</CardTitle>
+                    <CardDescription>Games played within 50 miles of your location</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {geoError ? (
+                      <p>Error fetching location. Please enable location services to see nearby games.</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {recentGames.map((game) => (
+                          <Card key={game.id} className="overflow-hidden">
+                            <CardHeader className="bg-gray-100 py-2 px-3">
+                              <CardTitle className="flex justify-between items-center">
+                                <span className="text-base w-1/3">{new Date(game.endTime).toLocaleString()}</span>
+                                <span className="text-lg font-bold w-1/3 text-center -ml-3">{game.mode}</span>
+                                <span className="text-sm font-semibold text-gray-600 w-1/3 text-right">
+                                  Avg MMR: {game.averageMMR}
+                                </span>
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-3">
+                              <p className="text-base mb-1 text-center font-semibold">{game.location}</p>
+                              <p className="text-sm mb-2 text-center text-gray-600">
+                                {game.distance.toFixed(1)} miles away
+                              </p>
+                              <div className="flex justify-center items-center mb-4">
+                                <span className="text-5xl font-bold text-blue-600 mr-4">{game.blueScore}</span>
+                                <span className="text-3xl font-bold">-</span>
+                                <span className="text-5xl font-bold text-red-600 ml-4">{game.redScore}</span>
+                              </div>
+                              <div>
+                                <p className="text-base font-semibold mb-2">Players:</p>
+                                <div className="flex flex-wrap gap-3 justify-center">
+                                  {game.players.map(player => (
+                                    <div key={player.id} className="flex flex-col items-center">
+                                      <div className="rounded-full overflow-hidden w-10 h-10">
+                                        <InteractableProfilePicture
+                                          currentImage={player.profilePicture || ''}
+                                          onClick={() => handlePlayerClick(player.id)}
+                                          size="small"
+                                        />
+                                      </div>
+                                      <span className="text-sm mt-1">{player.name}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+              <TabsContent value="leaderboard">
+                <div className="pt-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <div className="flex space-x-2">
+                      <Tabs defaultValue="5v5" onValueChange={(value) => setLeaderboardMode(value as '5v5' | '11v11')}>
+                        <TabsList className="h-8">
+                          <TabsTrigger value="5v5" className="px-2 py-1 text-sm">5v5</TabsTrigger>
+                          <TabsTrigger value="11v11" className="px-2 py-1 text-sm">11v11</TabsTrigger>
+                        </TabsList>
+                      </Tabs>
+                      <Tabs defaultValue="male" onValueChange={(value) => setLeaderboardGender(value as 'male' | 'female')}>
+                        <TabsList className="h-8">
+                          <TabsTrigger value="male" className="px-2 py-1 text-sm">Male</TabsTrigger>
+                          <TabsTrigger value="female" className="px-2 py-1 text-sm">Female</TabsTrigger>
+                        </TabsList>
+                      </Tabs>
+                    </div>
+                    <Input
+                      type="text"
+                      placeholder="Search player"
+                      className="w-48"
+                      value={leaderboardSearch}
+                      onChange={(e) => setLeaderboardSearch(e.target.value)}
+                    />
+                  </div>
+                  <div className="mt-4">
+                    <h3 className="text-lg font-semibold mb-2">
+                      Top {leaderboardGender === 'male' ? 'Male' : 'Female'} Players ({leaderboardMode})
+                    </h3>
+                    <div className="flex space-x-4">
+                      <div className="w-1/2 space-y-2">
+                        {leaderboardPlayers
+                          .filter(player => player.name.toLowerCase().includes(leaderboardSearch.toLowerCase()))
+                          .slice(0, Math.ceil(leaderboardPlayers.length / 2))
+                          .map((player) => (
+                            <div key={player.id} className="flex items-center justify-between bg-white p-2 rounded-lg shadow">
+                              <div className="flex items-center space-x-2">
+                                <span className="text-sm font-semibold w-6 text-right">#{player.rank}</span>
+                                <div className="rounded-full overflow-hidden w-8 h-8">
+                                  <InteractableProfilePicture
+                                    currentImage={player.profilePicture}
+                                    onClick={() => handlePlayerClick(player.id)}
+                                    size="small"
+                                  />
+                                </div>
+                                <span className="text-sm font-semibold">{player.name}</span>
+                              </div>
+                              <span className="text-sm font-bold text-green-600">MMR: {player.mmr}</span>
+                            </div>
+                          ))}
+                      </div>
+                      <div className="w-1/2 space-y-2">
+                        {leaderboardPlayers
+                          .filter(player => player.name.toLowerCase().includes(leaderboardSearch.toLowerCase()))
+                          .slice(Math.ceil(leaderboardPlayers.length / 2))
+                          .map((player) => (
+                            <div key={player.id} className="flex items-center justify-between bg-white p-2 rounded-lg shadow">
+                              <div className="flex items-center space-x-2">
+                                <span className="text-sm font-semibold w-6 text-right">#{player.rank}</span>
+                                <div className="rounded-full overflow-hidden w-8 h-8">
+                                  <InteractableProfilePicture
+                                    currentImage={player.profilePicture}
+                                    onClick={() => handlePlayerClick(player.id)}
+                                    size="small"
+                                  />
+                                </div>
+                                <span className="text-sm font-semibold">{player.name}</span>
+                              </div>
+                              <span className="text-sm font-bold text-green-600">MMR: {player.mmr}</span>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                    {leaderboardPlayers.length < 1000 && !isLoadingMore && (
+                      <Button 
+                        onClick={handleLoadMore} 
+                        className="w-full mt-4"
+                        disabled={isLoadingMore}
+                      >
+                        Load More
+                      </Button>
+                    )}
+                    {isLoadingMore && (
+                      <p className="text-center mt-4">Loading more players...</p>
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
+              <TabsContent value="friends" className="h-[calc(100vh-260px)] overflow-y-auto">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Friends</CardTitle>
+                    <CardDescription>Manage your friends list</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex space-x-2 mb-4">
+                      <Input 
+                        placeholder="Search users" 
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                      />
+                      <Button onClick={searchUsers}>Search</Button>
+                      {searchResults.length > 0 && (
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => setSearchResults([])}
+                        >
+                          X
+                        </Button>
+                      )}
+                    </div>
+                    {searchResults.length > 0 && (
+                      <div className="mb-4">
+                        <h3 className="font-bold mb-2">Search Results:</h3>
+                        <ul className="space-y-2">
+                          {searchResults.map((user) => (
+                            <li key={user.id} className="flex items-center space-x-2 border-b pb-2">
+                              <InteractableProfilePicture
+                                currentImage={user.profilePicture}
+                                onImageChange={undefined}
+                                onClick={() => fetchUserProfile(user.id)}
+                              />
+                              <span>{user.name}</span>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="ml-auto"
+                                onClick={() => addFriend(user.id)}
+                              >
+                                Add Friend
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <div className="mb-4">
+                      <Input 
+                        placeholder="Filter friends" 
+                        value={friendSearchQuery}
+                        onChange={(e) => setFriendSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-4 overflow-y-auto max-h-[calc(100vh-400px)]">
+                      <h3 className="font-bold mb-2">Your Friends:</h3>
+                      <ul className="space-y-2">
+                        {filteredFriends.map((friend) => (
+                          <li key={friend.id} className="flex items-center space-x-2 border-b pb-2">
+                            <InteractableProfilePicture
+                              currentImage={friend.profilePicture || null}
+                              onImageChange={undefined}
+                              onClick={() => friend.id && fetchUserProfile(friend.id)}
+                            />
+                            <span className="font-semibold">{friend.name}</span>
+                            <div className="ml-auto space-x-2">
+                              <Button variant="outline" size="sm">Message</Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => removeFriend(friend)}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    {pendingRequests.length > 0 && (
+                      <div className="mt-4">
+                        <h3 className="font-bold mb-2">Pending Friend Requests:</h3>
+                        <ul className="space-y-2">
+                          {pendingRequests.map((request) => (
+                            <li key={request.id} className="flex items-center space-x-2 border-b pb-2">
+                              <InteractableProfilePicture
+                                currentImage={request.profilePicture}
+                                onImageChange={undefined}
+                                onClick={() => fetchUserProfile(request.id)}
+                              />
+                              <span>{request.name}</span>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="ml-auto"
+                                onClick={() => acceptFriendRequest(request.id)}
+                              >
+                                Accept
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          </main>
+
+          {!infoDialogOpen && (
+            <div className="fixed bottom-8 left-0 right-0 flex flex-col items-center space-y-4 z-30">
+              <Button 
+                className="w-64 h-16 text-2xl bg-green-500 hover:bg-green-600 text-white border-2 border-black"
+                onClick={toggleQueue}
+                disabled={gameState === 'loading' || isPenalized || (!isGameInProgress && queueStatus === 'matched')}
+              >
+                {inGame ? 'Return to Game' :
+                 queueStatus === 'idle' ? 'Play' : 
+                 queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!'}
+              </Button>
+              <Button 
+                variant="outline" 
+                className="text-sm"
+                onClick={() => setGameMode(gameMode === '5v5' ? '11v11' : '5v5')}
+                disabled={queueStatus !== 'idle' || gameState !== 'idle' || isGameInProgress || isPenalized}
+              >
+                Game Mode: {gameMode}
+              </Button>
+            </div>
+          )}
+
+          {selectedProfile && (
+            <Dialog open={!!selectedProfile} onOpenChange={() => setSelectedProfile(null)}>
+              <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                  <DialogTitle>{selectedProfile.name}'s Profile</DialogTitle>
+                </DialogHeader>
+                <UserProfile
+                  {...selectedProfile}
+                  mmr11v11={selectedProfile.mmr11v11 || 0}
+                  onProfilePictureChange={undefined}
+                  onBioChange={handleBioChange}
+                />
+                <div className="flex justify-between mt-4">
+                  <Button onClick={() => setSelectedProfile(null)}>Close</Button>
+                  {!selectedProfile.isCurrentUser && (
+                    <Button onClick={handleAddFriendFromProfile}>Add Friend</Button>
                   )}
                 </div>
-                {searchResults.length > 0 && (
-                  <div className="mb-4">
-                    <h3 className="font-bold mb-2">Search Results:</h3>
-                    <ul className="space-y-2">
-                      {searchResults.map((user) => (
-                        <li key={user.id} className="flex items-center space-x-2 border-b pb-2">
-                          <InteractableProfilePicture
-                            currentImage={user.profilePicture}
-                            onImageChange={undefined}
-                            onClick={() => fetchUserProfile(user.id)}
-                          />
-                          <span>{user.name}</span>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="ml-auto"
-                            onClick={() => addFriend(user.id)}
-                          >
-                            Add Friend
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                <div className="mb-4">
-                  <Input 
-                    placeholder="Filter friends" 
-                    value={friendSearchQuery}
-                    onChange={(e) => setFriendSearchQuery(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-4 overflow-y-auto max-h-[calc(100vh-400px)]">
-                  <h3 className="font-bold mb-2">Your Friends:</h3>
-                  <ul className="space-y-2">
-                    {filteredFriends.map((friend) => (
-                      <li key={friend.id} className="flex items-center space-x-2 border-b pb-2">
-                        <InteractableProfilePicture
-                          currentImage={friend.profilePicture || null}
-                          onImageChange={undefined}
-                          onClick={() => friend.id && fetchUserProfile(friend.id)}
-                        />
-                        <span className="font-semibold">{friend.name}</span>
-                        <div className="ml-auto space-x-2">
-                          <Button variant="outline" size="sm">Message</Button>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            onClick={() => removeFriend(friend)}
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+              </DialogContent>
+            </Dialog>
+          )}
 
-                {pendingRequests.length > 0 && (
-                  <div className="mt-4">
-                    <h3 className="font-bold mb-2">Pending Friend Requests:</h3>
-                    <ul className="space-y-2">
-                      {pendingRequests.map((request) => (
-                        <li key={request.id} className="flex items-center space-x-2 border-b pb-2">
-                          <InteractableProfilePicture
-                            currentImage={request.profilePicture}
-                            onImageChange={undefined}
-                            onClick={() => fetchUserProfile(request.id)}
-                          />
-                          <span>{request.name}</span>
-                          <Button 
-                            variant="outline" 
-                            size="sm" 
-                            className="ml-auto"
-                            onClick={() => acceptFriendRequest(request.id)}
-                          >
-                            Accept
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </main>
+          <Dialog open={!!friendToRemove} onOpenChange={(open) => {
+            if (!open) setFriendToRemove(null);
+          }}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Remove Friend</DialogTitle>
+              </DialogHeader>
+              <p>Are you sure you want to remove {friendToRemove?.name} from your friends list?</p>
+              <div className="flex justify-end space-x-2">
+                <Button variant="outline" onClick={() => setFriendToRemove(null)}>Cancel</Button>
+                <Button onClick={confirmRemoveFriend}>Confirm</Button>
+              </div>
+            </DialogContent>
+          </Dialog>
 
-      {!infoDialogOpen && (
-        <div className="fixed bottom-8 left-0 right-0 flex flex-col items-center space-y-4 z-30">
-          <Button 
-            className="w-64 h-16 text-2xl bg-green-500 hover:bg-green-600 text-white border-2 border-black"
-            onClick={toggleQueue}
-            disabled={gameState === 'loading' || isPenalized || (!isGameInProgress && queueStatus === 'matched')}
-          >
-            {isGameInProgress ? 'Return to Game' :
-             queueStatus === 'idle' ? 'Play' : 
-             queueStatus === 'queuing' ? `Queuing${dots}` : 'Match Found!'}
-          </Button>
-          <Button 
-            variant="outline" 
-            className="text-sm"
-            onClick={() => setGameMode(gameMode === '5v5' ? '11v11' : '5v5')}
-            disabled={queueStatus !== 'idle' || gameState !== 'idle' || isGameInProgress || isPenalized}
-          >
-            Game Mode: {gameMode}
-          </Button>
-        </div>
+          <Button variant="link" className="absolute bottom-4 left-4">Home</Button>
+        </>
       )}
-
-      {selectedProfile && (
-        <Dialog open={!!selectedProfile} onOpenChange={() => setSelectedProfile(null)}>
-          <DialogContent className="sm:max-w-[425px]">
-            <DialogHeader>
-              <DialogTitle>{selectedProfile.name}'s Profile</DialogTitle>
-            </DialogHeader>
-            <UserProfile
-              {...selectedProfile}
-              mmr11v11={selectedProfile.mmr111v11 || 0}
-              onProfilePictureChange={undefined}
-              onBioChange={handleBioChange}
-            />
-            <div className="flex justify-between mt-4">
-              <Button onClick={() => setSelectedProfile(null)}>Close</Button>
-              {!selectedProfile.isCurrentUser && (
-                <Button onClick={handleAddFriendFromProfile}>Add Friend</Button>
-              )}
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      <Dialog open={!!friendToRemove} onOpenChange={(open) => {
-        if (!open) setFriendToRemove(null);
-      }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Remove Friend</DialogTitle>
-          </DialogHeader>
-          <p>Are you sure you want to remove {friendToRemove?.name} from your friends list?</p>
-          <div className="flex justify-end space-x-2">
-            <Button variant="outline" onClick={() => setFriendToRemove(null)}>Cancel</Button>
-            <Button onClick={confirmRemoveFriend}>Confirm</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Button variant="link" className="absolute bottom-4 left-4">Home</Button>
     </div>
   )
 }
