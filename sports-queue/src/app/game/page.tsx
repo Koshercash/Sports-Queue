@@ -81,7 +81,13 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
   useEffect(() => {
     console.log('GameScreen mounted. Initial match:', initialMatch);
-    console.log('Current user:', user);
+    console.log('Current user ID:', currentUserId);
+    
+    if (!currentUserId) {
+      console.error('No currentUserId provided to GameScreen');
+      // Handle this error case, perhaps by redirecting to the login page
+      return;
+    }
     
     // Load game state from localStorage on component mount
     const savedGameStateString = localStorage.getItem('gameState');
@@ -128,19 +134,36 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
     // Clear the timer when the component unmounts
     return () => clearInterval(timer);
-  }, [initialMatch, user]);
+  }, [initialMatch, currentUserId]);
 
   useEffect(() => {
     console.log('Current match state:', match);
-  }, [match]);
-
-  useEffect(() => {
-    if (user && match) {
-      const foundPlayer = [...match.team1, ...match.team2].find(p => p.id === user.userId);
+    console.log('Current user ID:', currentUserId);
+    
+    if (match) {
+      const allPlayers = [...match.team1, ...match.team2];
+      const foundPlayer = allPlayers.find(p => p.id === currentUserId);
       console.log('Found user player:', foundPlayer);
-      setUserPlayer(foundPlayer || null);
+      
+      if (foundPlayer) {
+        setUserPlayer(foundPlayer);
+      } else {
+        console.warn(`User with ID ${currentUserId} not found in the match`);
+        // Handle the case where the user is not found in the match
+        // For example, you could set a default player or show an error message
+        setUserPlayer({
+          id: currentUserId,
+          name: 'Unknown Player',
+          position: 'Unknown',
+          team: 'blue', // or some default team
+          profilePicture: null
+        });
+      }
+    } else {
+      console.warn('No match data available');
+      setUserPlayer(null);
     }
-  }, [user, match]);
+  }, [match, currentUserId]);
 
   const handleBackClick = () => {
     console.log('Back button clicked');
@@ -417,7 +440,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
           <div className="absolute top-1/3 left-0 w-1 h-1/3 bg-white"></div>
           <div className="absolute top-1/3 right-0 w-1 h-1/3 bg-white"></div>
           
-          {userPlayer && (
+          {userPlayer ? (
             <div className={`absolute ${userPlayer.team === 'blue' ? 'left-1/4' : 'right-1/4'} inset-y-0 transform ${userPlayer.team === 'blue' ? '-translate-x-1/2' : 'translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
               <p className="text-4xl font-bold text-white mb-2">Position:</p>
               <div className={`w-48 h-48 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative`}>
@@ -436,6 +459,12 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                 )}
               </div>
               <p className="text-4xl font-bold text-white">{userPlayer.position}</p>
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <p className="text-2xl font-bold text-white bg-black bg-opacity-50 p-4 rounded">
+                Waiting for player data...
+              </p>
             </div>
           )}
 

@@ -833,7 +833,7 @@ async function startServer() {
       const player = players[i];
       const team = i % 2 === 0 ? team1 : team2;
       team.push({
-        id: player.userId._id,
+        id: player.userId._id.toString(), // Ensure this is a string
         name: player.userId.name,
         position: player.userId.position,
         profilePicture: player.userId.profilePicturePath ? `/uploads/${player.userId.profilePicturePath}` : null,

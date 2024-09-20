@@ -2,6 +2,8 @@
 
 import React, { createContext, useState, useEffect } from 'react';
 import { jwtDecode } from "jwt-decode";
+import axios from 'axios';
+import { API_BASE_URL } from '../config/api';
 
 export const UserContext = createContext();
 
@@ -10,19 +12,29 @@ export const UserProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const initializeUser = () => {
+    const initializeUser = async () => {
       const token = localStorage.getItem('token');
       console.log('Token found in localStorage:', token ? 'Yes' : 'No');
       if (token) {
         try {
           const decodedToken = jwtDecode(token);
           console.log('Decoded token:', decodedToken);
-          setUser({
-            ...decodedToken,
-            isAdmin: decodedToken.isAdmin || false
+          
+          // Fetch user details from the server
+          const response = await axios.get(`${API_BASE_URL}/api/user-profile`, {
+            headers: { Authorization: `Bearer ${token}` }
           });
+          
+          const userData = {
+            ...decodedToken,
+            ...response.data,
+            isAdmin: decodedToken.isAdmin || false
+          };
+          
+          console.log('User data set in context:', userData);
+          setUser(userData);
         } catch (error) {
-          console.error('Error decoding token:', error);
+          console.error('Error initializing user:', error);
           localStorage.removeItem('token');
         }
       }
@@ -32,18 +44,28 @@ export const UserProvider = ({ children }) => {
     initializeUser();
   }, []);
 
-  const login = (token) => {
+  const login = async (token) => {
     console.log('Login called with token:', token);
     localStorage.setItem('token', token);
     try {
       const decodedToken = jwtDecode(token);
       console.log('Decoded token in login:', decodedToken);
-      setUser({
-        ...decodedToken,
-        isAdmin: decodedToken.isAdmin || false
+      
+      // Fetch user details from the server
+      const response = await axios.get(`${API_BASE_URL}/api/user-profile`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
+      
+      const userData = {
+        ...decodedToken,
+        ...response.data,
+        isAdmin: decodedToken.isAdmin || false
+      };
+      
+      console.log('User data set in login:', userData);
+      setUser(userData);
     } catch (error) {
-      console.error('Error decoding token in login:', error);
+      console.error('Error decoding token or fetching user data in login:', error);
     }
   };
 
