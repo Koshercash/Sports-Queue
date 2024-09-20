@@ -790,62 +790,78 @@ async function startServer() {
     }
   });
 
-  async function createMatch(gameMode, user) {
-    const mmrField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
-    const playerCount = gameMode === '5v5' ? 10 : 22;
-    
-    let players = await Queue.find({ gameMode })
-      .populate('userId')
-      .sort('timestamp')
-      .limit(playerCount);
+ 
+async function createMatch(gameMode, user) {
+  const mmrField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
+  const playerCount = gameMode === '5v5' ? 10 : 22;
+  
+  let players = await Queue.find({ gameMode })
+    .populate('userId')
+    .sort('timestamp')
+    .limit(playerCount);
 
-    // If not enough players in queue, add dummy players
-    if (players.length < playerCount) {
-      const dummyCount = playerCount - players.length;
-      const dummyPlayers = await User.aggregate([
-        { $match: { email: { $regex: /^dummy/ }, sex: user.sex } },
-        { $sample: { size: dummyCount } }
-      ]);
+  // If not enough players in queue, add dummy players
+  if (players.length < playerCount) {
+    const dummyCount = playerCount - players.length;
+    const dummyPlayers = await User.aggregate([
+      { $match: { email: { $regex: /^dummy/ }, sex: user.sex } },
+      { $sample: { size: dummyCount } }
+    ]);
 
-      players = [
-        ...players,
-        ...dummyPlayers.map(dp => ({ userId: dp }))
-      ];
-    }
-
-    // Ensure we have enough players
-    if (players.length < playerCount) {
-      console.log('Not enough players found, including dummies');
-      return null;
-    }
-
-    // Sort players by MMR difference from the user
-    players.sort((a, b) => 
-      Math.abs((a.userId[mmrField] || 1000) - user[mmrField]) - 
-      Math.abs((b.userId[mmrField] || 1000) - user[mmrField])
-    );
-
-    const team1 = [];
-    const team2 = [];
-
-    // Distribute players to teams
-    for (let i = 0; i < players.length; i++) {
-      const player = players[i];
-      const team = i % 2 === 0 ? team1 : team2;
-      team.push({
-        id: player.userId._id,
-        name: player.userId.name,
-        position: player.userId.position,
-        profilePicture: player.userId.profilePicturePath ? `/uploads/${player.userId.profilePicturePath}` : null,
-        mmr: player.userId[mmrField] || 1000
-      });
-    }
-
-    // Remove matched players from the queue
-    await Queue.deleteMany({ userId: { $in: players.map(p => p.userId._id) } });
-
-    return { team1, team2 };
+    players = [
+      ...players,
+      ...dummyPlayers.map(dp => ({ userId: dp }))
+    ];
   }
+
+  // Ensure we have enough players
+  if (players.length < playerCount) {
+    console.log('Not enough players found, including dummies');
+    return null;
+  }
+
+  // Sort players by MMR difference from the user
+  players.sort((a, b) => 
+    Math.abs((a.userId[mmrField] || 1000) - user[mmrField]) - 
+    Math.abs((b.userId[mmrField] || 1000) - user[mmrField])
+  );
+
+  const team1 = [];
+  const team2 = [];
+
+  // Distribute players to teams
+  for (let i = 0; i < players.length; i++) {
+    const player = players[i];
+    const team = i % 2 === 0 ? team1 : team2;
+    team.push({
+      userId: player.userId._id.toString(),
+      name: player.userId.name,
+      position: player.userId.position,
+      profilePicture: player.userId.profilePicturePath ? `/uploads/${player.userId.profilePicturePath}` : null,
+      mmr: player.userId[mmrField] || 1000,
+      team: i % 2 === 0 ? 'blue' : 'red'
+    });
+  }
+
+  // Remove matched players from the queue
+  await Queue.deleteMany({ userId: { $in: players.map(p => p.userId._id) } });
+
+  // Create a new game with the user's ID as the match ID
+  const newGame = new Game({
+    _id: user._id, // Use the user's ID as the match ID
+    players: players.map(p => p.userId._id),
+    gameMode,
+    status: 'lobby',
+    startTime: new Date()
+  });
+  await newGame.save();
+
+  return { 
+    id: newGame._id.toString(),
+    team1, 
+    team2 
+  };
+}
 
   // Update the /api/user/:id endpoint
   app.get('/api/user/:id', authMiddleware, async (req, res) => {

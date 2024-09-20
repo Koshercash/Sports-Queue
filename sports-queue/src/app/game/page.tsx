@@ -20,7 +20,7 @@ import { UserContext } from '../../contexts/UserContext';
 // For now, let's create placeholder versions:
 
 interface MatchPlayer {
-  id: string;
+  userId: string;
   name: string;
   position: string;
   team: 'blue' | 'red';
@@ -28,6 +28,7 @@ interface MatchPlayer {
 }
 
 interface Match {
+  id: string;
   team1: MatchPlayer[];
   team2: MatchPlayer[];
 }
@@ -56,7 +57,7 @@ interface UserProfileData {
 export default function GameScreen({ match: initialMatch, gameMode, onBackFromGame, currentUserId }: GameScreenProps) {
   const router = useRouter();
   const { gameState, setGameState } = useGameState();
-  const { user, isLoading } = useContext(UserContext);
+  const { user, isLoading, initializeUser } = useContext(UserContext);
   const [match, setMatch] = useState<Match | null>(initialMatch);
   const [showChat, setShowChat] = useState(false)
   const [showPlayerList, setShowPlayerList] = useState(false)
@@ -80,8 +81,19 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   };
 
   useEffect(() => {
+    const loadUser = async () => {
+      if (!user && !isLoading) {
+        console.log('User not found, attempting to reinitialize...');
+        await initializeUser();
+      }
+    };
+    loadUser();
+  }, [user, isLoading, initializeUser]);
+
+  useEffect(() => {
     console.log('GameScreen mounted. Initial match:', initialMatch);
-    console.log('Current user:', user);
+    console.log('Current user from context:', user);
+    console.log('Current userId prop:', currentUserId);
     
     // Load game state from localStorage on component mount
     const savedGameStateString = localStorage.getItem('gameState');
@@ -92,6 +104,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
         ...savedGameState,
         gameState: savedGameState.gameState || 'lobby',
         lobbyTime: savedGameState.lobbyTime || 0,
+        matchId: currentUserId, // Use the current user's ID as the match ID
       });
       setLobbyTime(savedGameState.lobbyTime || 0);
       if (savedGameState.match) {
@@ -112,6 +125,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
         readyCount: 0,
         gameStartTime: null,
         lobbyTime: 0,
+        matchId: currentUserId, // Use the current user's ID as the match ID
       });
     }
 
@@ -128,19 +142,37 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
     // Clear the timer when the component unmounts
     return () => clearInterval(timer);
-  }, [initialMatch, user]);
+  }, [initialMatch, user, currentUserId]);
 
   useEffect(() => {
     console.log('Current match state:', match);
   }, [match]);
 
   useEffect(() => {
-    if (user && match) {
-      const foundPlayer = [...match.team1, ...match.team2].find(p => p.id === user.userId);
-      console.log('Found user player:', foundPlayer);
-      setUserPlayer(foundPlayer || null);
+    if (match && user) {
+      const allPlayers = [...match.team1, ...match.team2];
+      console.log('All players:', allPlayers);
+      console.log('User ID to match:', user.id || user.userId);
+      let foundPlayer = allPlayers.find(p => p.userId === (user.id || user.userId));
+      
+      // If the user is not found in the match, assign them to a random position
+      if (!foundPlayer) {
+        console.log('User not found in match. Assigning random position.');
+        const randomTeam = Math.random() < 0.5 ? 'blue' : 'red';
+        const randomPosition = ['goalkeeper', 'defender', 'midfielder', 'striker'][Math.floor(Math.random() * 4)];
+        foundPlayer = {
+          userId: user.id || user.userId,
+          name: user.name,
+          position: randomPosition,
+          team: randomTeam,
+          profilePicture: user.profilePicture
+        };
+      }
+      
+      console.log('Found or assigned user player:', foundPlayer);
+      setUserPlayer(foundPlayer);
     }
-  }, [user, match]);
+  }, [match, user]);
 
   const handleBackClick = () => {
     console.log('Back button clicked');
@@ -196,7 +228,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
   const handleSendMessage = () => {
     if (newMessage.trim()) {
-      const currentPlayer = players.find(p => p.id === currentUserId);
+      const currentPlayer = players.find(p => p.userId === currentUserId);
       setChatMessages([...chatMessages, { 
         sender: currentPlayer?.name || 'You', 
         message: newMessage.trim(), 
@@ -210,8 +242,8 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     try {
       const token = localStorage.getItem('token');
       console.log('Token:', token ? 'exists' : 'not found');
-      console.log('Fetching profile for player:', player.id);
-      const response = await axios.get<UserProfileData>(`${API_BASE_URL}/api/user/${player.id}`, {
+      console.log('Fetching profile for player:', player.userId);
+      const response = await axios.get<UserProfileData>(`${API_BASE_URL}/api/user/${player.userId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       console.log('Profile data received:', response.data);
@@ -350,7 +382,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
         mode: gameMode,
         blueScore: gameState.blueScore,
         redScore: gameState.redScore,
-        players: players.map(p => p.id),
+        players: players.map(p => p.userId),
         endTime: new Date().toISOString(),
         location: fieldLocation.name,
       };
@@ -376,6 +408,15 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
   if (isLoading) {
     return <div>Loading...</div>;
+  }
+
+  if (!user) {
+    return (
+      <div>
+        <p>Error: User not found. Please try logging in again.</p>
+        <button onClick={() => window.location.href = '/'}>Go to Login</button>
+      </div>
+    );
   }
 
   return (
@@ -423,7 +464,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
               <div className={`w-48 h-48 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative`}>
                 {userPlayer.profilePicture ? (
                   <Image
-                    src={getPlayerImage(userPlayer)}
+                    src={userPlayer.profilePicture}
                     alt={userPlayer.name}
                     layout="fill"
                     objectFit="cover"
@@ -617,7 +658,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
                         {match && match.team1.map((player) => (
-                          <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
+                          <li key={player.userId} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
                                 <Image
@@ -643,7 +684,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
                         {match && match.team2.map((player) => (
-                          <li key={player.id} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
+                          <li key={player.userId} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
                                 <Image

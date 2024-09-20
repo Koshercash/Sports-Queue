@@ -44,7 +44,7 @@ interface Friend {
 }
 
 interface MatchPlayer {
-  id: string;
+  userId: string;
   name: string;
   position: string;
   team: 'blue' | 'red';
@@ -52,6 +52,7 @@ interface MatchPlayer {
 }
 
 interface Match {
+  id: string;
   team1: MatchPlayer[];
   team2: MatchPlayer[];
 }
@@ -246,7 +247,8 @@ export default function MainScreen() {
             mode: gameMode,
             lobbyTime: 0,
             gameEnded: false,
-            savedAt: new Date().toISOString()
+            savedAt: new Date().toISOString(),
+            matchId: response.data.match.id // Save the match ID (which is now the user's ID)
           };
           console.log('Saving game state:', gameStateToSave);
           localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
@@ -837,7 +839,7 @@ export default function MainScreen() {
             match={match}
             gameMode={gameMode}
             onBackFromGame={handleBackFromGame}
-            currentUserId={user?.id || ''}
+            currentUserId={user?.userId || ''}
           />
         ) : (
           <>
