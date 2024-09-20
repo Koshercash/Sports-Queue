@@ -98,7 +98,7 @@ interface Player {
 }
 
 export default function MainScreen() {
-  const { user } = useContext(UserContext);
+  const { user, isLoading } = useContext(UserContext);
   const router = useRouter();
   const { latitude, longitude, error: geoError } = useGeolocation();
 

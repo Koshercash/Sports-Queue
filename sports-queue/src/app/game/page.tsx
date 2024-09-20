@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useContext } from 'react'
 import axios from 'axios'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { useGameState } from '@/components/GameStateProvider'  // Import useGameState
 import { InteractableProfilePicture } from '../../components/InteractableProfilePicture';
 import { API_BASE_URL } from '../../config/api';
+import { UserContext } from '../../contexts/UserContext';
 
 // If useGameState and API_BASE_URL are not available, you'll need to create these
 // For now, let's create placeholder versions:
@@ -55,6 +56,7 @@ interface UserProfileData {
 export default function GameScreen({ match: initialMatch, gameMode, onBackFromGame, currentUserId }: GameScreenProps) {
   const router = useRouter();
   const { gameState, setGameState } = useGameState();
+  const { user, isLoading } = useContext(UserContext);
   const [match, setMatch] = useState<Match | null>(initialMatch);
   const [showChat, setShowChat] = useState(false)
   const [showPlayerList, setShowPlayerList] = useState(false)
@@ -79,6 +81,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
   useEffect(() => {
     console.log('GameScreen mounted. Initial match:', initialMatch);
+    console.log('Current user:', user);
     
     // Load game state from localStorage on component mount
     const savedGameStateString = localStorage.getItem('gameState');
@@ -125,19 +128,19 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
     // Clear the timer when the component unmounts
     return () => clearInterval(timer);
-  }, [initialMatch]);
+  }, [initialMatch, user]);
 
   useEffect(() => {
     console.log('Current match state:', match);
   }, [match]);
 
   useEffect(() => {
-    if (match) {
-      const foundPlayer = [...match.team1, ...match.team2].find(p => p.id === currentUserId);
+    if (user && match) {
+      const foundPlayer = [...match.team1, ...match.team2].find(p => p.id === user.userId);
       console.log('Found user player:', foundPlayer);
       setUserPlayer(foundPlayer || null);
     }
-  }, [match, currentUserId]);
+  }, [user, match]);
 
   const handleBackClick = () => {
     console.log('Back button clicked');
@@ -370,6 +373,10 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       onBackFromGame(true);
     }
   };
+
+  if (isLoading) {
+    return <div>Loading...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-white text-black relative flex flex-col">

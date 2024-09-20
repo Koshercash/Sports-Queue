@@ -7,23 +7,29 @@ export const UserContext = createContext();
 
 export const UserProvider = ({ children }) => {
   const [user, setUser] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    console.log('Token found in localStorage:', token ? 'Yes' : 'No');
-    if (token) {
-      try {
-        const decodedToken = jwtDecode(token);
-        console.log('Decoded token:', decodedToken);
-        setUser({
-          ...decodedToken,
-          isAdmin: decodedToken.isAdmin || false
-        });
-      } catch (error) {
-        console.error('Error decoding token:', error);
-        localStorage.removeItem('token');
+    const initializeUser = () => {
+      const token = localStorage.getItem('token');
+      console.log('Token found in localStorage:', token ? 'Yes' : 'No');
+      if (token) {
+        try {
+          const decodedToken = jwtDecode(token);
+          console.log('Decoded token:', decodedToken);
+          setUser({
+            ...decodedToken,
+            isAdmin: decodedToken.isAdmin || false
+          });
+        } catch (error) {
+          console.error('Error decoding token:', error);
+          localStorage.removeItem('token');
+        }
       }
-    }
+      setIsLoading(false);
+    };
+
+    initializeUser();
   }, []);
 
   const login = (token) => {
@@ -50,7 +56,7 @@ export const UserProvider = ({ children }) => {
   console.log('Current user in UserContext:', user);
 
   return (
-    <UserContext.Provider value={{ user, login, logout }}>
+    <UserContext.Provider value={{ user, login, logout, isLoading }}>
       {children}
     </UserContext.Provider>
   );
