@@ -730,52 +730,56 @@ async function startServer() {
   app.post('/api/queue/join', authMiddleware, async (req, res) => {
     try {
       const { gameMode } = req.body;
+      console.log(`User ${req.userId} attempting to join ${gameMode} queue`);
+  
       const penaltyEndTime = await checkUserPenalty(req.userId);
       if (penaltyEndTime) {
+        console.log(`User ${req.userId} is penalized until ${penaltyEndTime}`);
         return res.status(403).json({ 
           error: 'You are currently penalized and cannot join games',
           penaltyEndTime
         });
       }
-
-      // Check if user is already in a game
-      const activeGame = await Game.findOne({ 
-        players: req.userId,
-        status: { $in: ['lobby', 'inProgress'] }
-      });
-
-      if (activeGame) {
-        return res.status(400).json({ error: 'You are already in a game' });
-      }
-
-      // Check if there's an ongoing game that the user was part of
-      const recentGame = await Game.findOne({
-        players: req.userId,
-        status: 'inProgress',
-        startTime: { $gt: new Date(Date.now() - 2 * 60 * 60 * 1000) } // Games started within the last 2 hours
-      });
-
-      if (recentGame) {
-        return res.status(400).json({ error: 'You cannot rejoin a game in progress that you have left' });
-      }
-
+  
+      // Remove user from any existing queues and games
+      await Queue.deleteMany({ userId: req.userId });
+      await Game.updateMany(
+        { players: req.userId, status: { $in: ['lobby', 'inProgress'] } },
+        { $pull: { players: req.userId } }
+      );
+      console.log(`Removed user ${req.userId} from existing queues and games`);
+  
       const user = await User.findById(req.userId);
+      if (!user) {
+        console.log(`User ${req.userId} not found`);
+        return res.status(404).json({ error: 'User not found' });
+      }
+  
       const newQueueEntry = new Queue({
         userId: req.userId,
         gameMode
       });
       await newQueueEntry.save();
+      console.log(`User ${req.userId} added to ${gameMode} queue`);
       
       // Create a match if there are enough players in the queue
-      const match = await createMatch(gameMode, user);
-      if (match) {
-        res.json({ message: 'Match found', match });
-      } else {
-        res.status(200).json({ message: 'Joined queue successfully' });
+      try {
+        const match = await createMatch(gameMode, user);
+        if (match) {
+          console.log(`Match found for user ${req.userId}:`, match);
+          res.json({ message: 'Match found', match });
+        } else {
+          console.log(`User ${req.userId} joined queue successfully`);
+          res.status(200).json({ message: 'Joined queue successfully' });
+        }
+      } catch (matchError) {
+        console.error('Error creating match:', matchError);
+        // If there's an error creating the match, we'll still keep the user in the queue
+        res.status(200).json({ message: 'Joined queue successfully, but match creation failed' });
       }
     } catch (error) {
-      console.error('Error joining queue:', error);
-      res.status(500).json({ error: 'Failed to join queue' });
+      console.error('Detailed error in joining queue:', error);
+      res.status(500).json({ error: 'Failed to join queue', details: error.message });
     }
   });
 
@@ -800,6 +804,8 @@ async function createMatch(gameMode, user) {
     .sort('timestamp')
     .limit(playerCount);
 
+    console.log(`Found ${players.length} players in queue for ${gameMode}`);
+
   // If not enough players in queue, add dummy players
   if (players.length < playerCount) {
     const dummyCount = playerCount - players.length;
@@ -812,6 +818,7 @@ async function createMatch(gameMode, user) {
       ...players,
       ...dummyPlayers.map(dp => ({ userId: dp }))
     ];
+    console.log(`Added ${dummyCount} dummy players`);
   }
 
   // Ensure we have enough players
@@ -847,20 +854,28 @@ async function createMatch(gameMode, user) {
   await Queue.deleteMany({ userId: { $in: players.map(p => p.userId._id) } });
 
   // Create a new game with the user's ID as the match ID
-  const newGame = new Game({
-    _id: user._id, // Use the user's ID as the match ID
-    players: players.map(p => p.userId._id),
-    gameMode,
-    status: 'lobby',
-    startTime: new Date()
-  });
-  await newGame.save();
+ // Create a new game with a new unique ID
+ const newGame = new Game({
+  players: players.map(p => p.userId._id),
+  gameMode,
+  status: 'lobby',
+  startTime: new Date()
+});
+await newGame.save();
 
-  return { 
-    id: newGame._id.toString(),
-    team1, 
-    team2 
-  };
+try {
+  await newGame.save();
+  console.log(`New game created with ID: ${newGame._id}`);
+} catch (error) {
+  console.error('Error creating new game:', error);
+  throw error;
+}
+
+return { 
+  id: newGame._id.toString(),
+  team1, 
+  team2 
+};
 }
 
   // Update the /api/user/:id endpoint
@@ -982,6 +997,20 @@ async function createMatch(gameMode, user) {
   
       console.log('Leave game request:', { lobbyTime, gameStartTime, timeDifference });
   
+      // Find and update the active game for this user
+      const activeGame = await Game.findOne({ 
+        players: req.userId,
+        status: { $in: ['lobby', 'inProgress'] }
+      });
+
+      if (activeGame) {
+        activeGame.status = 'ended';
+        await activeGame.save();
+      }
+
+      // Remove the user from any active queues
+      await Queue.deleteMany({ userId: req.userId });
+
       if (lobbyTime >= 8 && timeDifference <= 20) {
         let penalty = await Penalty.findOne({ userId: req.userId });
         if (!penalty) {

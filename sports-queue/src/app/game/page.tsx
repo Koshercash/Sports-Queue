@@ -73,11 +73,221 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
   const players = match ? [...match.team1, ...match.team2] : [];
 
-  const onLeaveGame = async (gameStartTime: Date | null) => {
-    console.log('Leaving game', gameStartTime);
-    // Implement the leave game logic here
-    // For now, we'll just call onBackFromGame
-    onBackFromGame(true);
+  const handleLeaveGame = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${API_BASE_URL}/api/game/leave`, {
+        lobbyTime,
+        gameStartTime: gameState.gameStartTime
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      onBackFromGame(true);
+    } catch (error) {
+      console.error('Error leaving game:', error);
+      alert('Failed to leave game. Please try again.');
+    }
+  };
+
+  const handleLeaveGameClick = () => {
+    if (gameState.gameState === 'ended') {
+      onBackFromGame(true);
+      return;
+    }
+
+    const now = new Date();
+    const timeDifference = gameState.gameStartTime ? (now.getTime() - gameState.gameStartTime.getTime()) / (1000 * 60) : 0;
+    
+    let warningMessage = '';
+    if (lobbyTime >= 8 && timeDifference <= 20 && gameState.gameState !== 'ended') {
+      warningMessage = 'Warning: Leaving the game now may result in a penalty.';
+    }
+
+    setLeaveWarningMessage(warningMessage);
+    setShowLeavePrompt(true);
+  };
+
+  const handleConfirmLeave = async () => {
+    setShowLeavePrompt(false);
+    await handleLeaveGame();
+  };
+
+  const handleSendMessage = () => {
+    if (newMessage.trim()) {
+      const currentPlayer = players.find(p => p.userId === currentUserId);
+      setChatMessages([...chatMessages, { 
+        sender: currentPlayer?.name || 'You', 
+        message: newMessage.trim(), 
+        team: currentPlayer?.team || 'blue'
+      }]);
+      setNewMessage('');
+    }
+  };
+
+  const handlePlayerClick = async (player: MatchPlayer) => {
+    try {
+      const token = localStorage.getItem('token');
+      console.log('Token:', token ? 'exists' : 'not found');
+      console.log('Fetching profile for player:', player.userId);
+      const response = await axios.get<UserProfileData>(`${API_BASE_URL}/api/user/${player.userId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      console.log('Profile data received:', response.data);
+      const profileData = {
+        ...response.data,
+        profilePicture: response.data.profilePicture
+          ? response.data.profilePicture.startsWith('http')
+            ? response.data.profilePicture
+            : `${API_BASE_URL}${response.data.profilePicture}`
+          : null,
+        cityTown: response.data.cityTown || ''
+      };
+      setSelectedProfile(profileData);
+    } catch (error) {
+      console.error('Failed to fetch user profile:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Error response:', error.response?.data);
+        console.error('Error status:', error.response?.status);
+      }
+      alert('Failed to load user profile. Please try again.');
+    }
+  };
+
+  const handleAddFriend = async () => {
+    if (selectedProfile) {
+      try {
+        const token = localStorage.getItem('token');
+        await axios.post(`${API_BASE_URL}/api/friends/add`, 
+          { friendId: selectedProfile.id },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        alert('Friend request sent successfully');
+      } catch (error) {
+        console.error('Failed to send friend request:', error);
+        alert('Failed to send friend request. Please try again.');
+      }
+    }
+  };
+
+  const handleReportPlayer = (playerId: string) => {
+    setReportedPlayer(playerId);
+    setReportReason(null);
+  };
+
+  const confirmReportPlayer = async () => {
+    if (reportedPlayer && reportReason) {
+      try {
+        const token = localStorage.getItem('token');
+        await axios.post(`${API_BASE_URL}/api/report-player`, 
+          { 
+            reportedPlayerId: reportedPlayer,
+            reason: reportReason
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        alert('Player reported successfully');
+      } catch (error) {
+        console.error('Failed to report player:', error);
+        alert('Failed to report player. Please try again.');
+      }
+      setReportedPlayer(null);
+      setReportReason(null);
+    } else {
+      alert('Please select a reason for reporting.');
+    }
+  };
+
+  const getProfilePictureUrl = (profilePicture: string | null | undefined): string => {
+    if (!profilePicture) return '/default-avatar.jpg';
+    if (profilePicture.startsWith('http')) return profilePicture;
+    return `${API_BASE_URL}${profilePicture}`;
+  };
+
+  const positionOrder = ['goalkeeper', 'defender', 'midfielder', 'striker'];
+  const sortedPlayers = players.sort((a, b) => 
+    positionOrder.indexOf(a.position) - positionOrder.indexOf(b.position)
+  );
+
+  const blueTeam = sortedPlayers.filter(p => p.team === 'blue');
+  const redTeam = sortedPlayers.filter(p => p.team === 'red');
+
+  // Function to get the field location (this is a placeholder, replace with actual logic)
+  const getFieldLocation = () => {
+    return {
+      name: "Central Park Field 1",
+      gpsLink: "https://goo.gl/maps/exampleLink",
+      image: "/Soccer-Field-Placeholder.jpg",  // Use the default image from the field-images folder
+    };
+  };
+
+  const fieldLocation = getFieldLocation();
+
+  const handleReadyUp = () => {
+    if (gameState.gameState === 'lobby') {
+      const newReadyState = !gameState.isReady;
+      setGameState((prevState: any) => ({
+        ...prevState,
+        isReady: newReadyState,
+        readyCount: newReadyState ? prevState.readyCount + 1 : prevState.readyCount - 1,
+        gameState: newReadyState ? 'inProgress' : 'lobby',
+        totalGameTime: newReadyState ? 120 : 0,
+        halfTimeOccurred: false,
+      }));
+    }
+  };
+
+  const handleReportScore = () => {
+    if (gameState.gameState === 'reportScore') {
+      setGameState((prevState: any) => ({
+        ...prevState,
+        gameState: 'ended',
+      }));
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  const handleGameEnd = async () => {
+    // Update the game state to 'ended'
+    setGameState((prevState: any) => ({
+      ...prevState,
+      gameState: 'ended',
+    }));
+
+    // Save the game result
+    try {
+      const token = localStorage.getItem('token');
+      const gameResult = {
+        mode: gameMode,
+        blueScore: gameState.blueScore,
+        redScore: gameState.redScore,
+        players: players.map(p => p.userId),
+        endTime: new Date().toISOString(),
+        location: fieldLocation.name,
+      };
+
+      const response = await axios.post(`${API_BASE_URL}/api/game/result`, gameResult, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      console.log('Game result saved:', response.data);
+
+      localStorage.setItem('gameState', JSON.stringify({
+        ...JSON.parse(localStorage.getItem('gameState') || '{}'),
+        gameEnded: true
+      }));
+
+      onBackFromGame(true); // Pass true to indicate a game just ended
+    } catch (error) {
+      console.error('Failed to save game result:', error);
+      alert('Failed to save game result. The game has ended, but it may not appear in your recent games.');
+      onBackFromGame(true);
+    }
   };
 
   useEffect(() => {
@@ -187,225 +397,6 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     onBackFromGame();
   };
 
-  const handleLeaveGameClick = () => {
-    if (gameState.gameState === 'ended') {
-      onBackFromGame(true);
-      return;
-    }
-
-    const now = new Date();
-    const timeDifference = gameState.gameStartTime ? (now.getTime() - gameState.gameStartTime.getTime()) / (1000 * 60) : 0;
-    
-    let warningMessage = '';
-    if (lobbyTime >= 8 && timeDifference <= 20 && gameState.gameState !== 'ended') {
-      warningMessage = 'Warning: Leaving the game now may result in a penalty.';
-    }
-
-    setLeaveWarningMessage(warningMessage);
-    setShowLeavePrompt(true);
-  };
-
-  const handleConfirmLeave = async () => {
-    setShowLeavePrompt(false);
-    await onLeaveGame(gameState.gameStartTime);
-    // Clear local game state
-    localStorage.removeItem('gameState');
-    setGameState({
-      gameState: 'lobby',
-      totalGameTime: 0,
-      gameTime: 0,
-      reportScoreTime: 0,
-      blueScore: 0,
-      redScore: 0,
-      halfTimeOccurred: false,
-      isReady: false,
-      readyCount: 0,
-      gameStartTime: null,
-      lobbyTime: 0,
-    });
-    onBackFromGame(true); // Pass true to indicate we're leaving the game
-  };
-
-  const handleSendMessage = () => {
-    if (newMessage.trim()) {
-      const currentPlayer = players.find(p => p.userId === currentUserId);
-      setChatMessages([...chatMessages, { 
-        sender: currentPlayer?.name || 'You', 
-        message: newMessage.trim(), 
-        team: currentPlayer?.team || 'blue'
-      }]);
-      setNewMessage('');
-    }
-  };
-
-  const handlePlayerClick = async (player: MatchPlayer) => {
-    try {
-      const token = localStorage.getItem('token');
-      console.log('Token:', token ? 'exists' : 'not found');
-      console.log('Fetching profile for player:', player.userId);
-      const response = await axios.get<UserProfileData>(`${API_BASE_URL}/api/user/${player.userId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      console.log('Profile data received:', response.data);
-      const profileData = {
-        ...response.data,
-        profilePicture: response.data.profilePicture
-          ? response.data.profilePicture.startsWith('http')
-            ? response.data.profilePicture
-            : `${API_BASE_URL}${response.data.profilePicture}`
-          : null,
-        cityTown: response.data.cityTown || ''
-      };
-      setSelectedProfile(profileData);
-    } catch (error) {
-      console.error('Failed to fetch user profile:', error);
-      if (axios.isAxiosError(error)) {
-        console.error('Error response:', error.response?.data);
-        console.error('Error status:', error.response?.status);
-      }
-      alert('Failed to load user profile. Please try again.');
-    }
-  };
-
-  const handleAddFriend = async () => {
-    if (selectedProfile) {
-      try {
-        const token = localStorage.getItem('token');
-        await axios.post(`${API_BASE_URL}/api/friends/add`, 
-          { friendId: selectedProfile.id },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        alert('Friend request sent successfully');
-      } catch (error) {
-        console.error('Failed to send friend request:', error);
-        alert('Failed to send friend request. Please try again.');
-      }
-    }
-  };
-
-  const handleReportPlayer = (playerId: string) => {
-    setReportedPlayer(playerId);
-    setReportReason(null);
-  };
-
-  const confirmReportPlayer = async () => {
-    if (reportedPlayer && reportReason) {
-      try {
-        const token = localStorage.getItem('token');
-        await axios.post(`${API_BASE_URL}/api/report-player`, 
-          { 
-            reportedPlayerId: reportedPlayer,
-            reason: reportReason
-          },
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        alert('Player reported successfully');
-      } catch (error) {
-        console.error('Failed to report player:', error);
-        alert('Failed to report player. Please try again.');
-      }
-      setReportedPlayer(null);
-      setReportReason(null);
-    } else {
-      alert('Please select a reason for reporting.');
-    }
-  };
-
-  const getPlayerImage = (player: MatchPlayer) => {
-    if (player.profilePicture) {
-      return player.profilePicture.startsWith('http')
-        ? player.profilePicture
-        : `${API_BASE_URL}${player.profilePicture}`;
-    }
-    return '/default-avatar.jpg'; // Return a default avatar image path
-  };
-
-  const positionOrder = ['goalkeeper', 'defender', 'midfielder', 'striker'];
-  const sortedPlayers = players.sort((a, b) => 
-    positionOrder.indexOf(a.position) - positionOrder.indexOf(b.position)
-  );
-
-  const blueTeam = sortedPlayers.filter(p => p.team === 'blue');
-  const redTeam = sortedPlayers.filter(p => p.team === 'red');
-
-  // Function to get the field location (this is a placeholder, replace with actual logic)
-  const getFieldLocation = () => {
-    return {
-      name: "Central Park Field 1",
-      gpsLink: "https://goo.gl/maps/exampleLink",
-      image: "/Soccer-Field-Placeholder.jpg",  // Use the default image from the field-images folder
-    };
-  };
-
-  const fieldLocation = getFieldLocation();
-
-  const handleReadyUp = () => {
-    if (gameState.gameState === 'lobby') {
-      const newReadyState = !gameState.isReady;
-      setGameState((prevState: any) => ({
-        ...prevState,
-        isReady: newReadyState,
-        readyCount: newReadyState ? prevState.readyCount + 1 : prevState.readyCount - 1,
-        gameState: newReadyState ? 'inProgress' : 'lobby',
-        totalGameTime: newReadyState ? 120 : 0,
-        halfTimeOccurred: false,
-      }));
-    }
-  };
-
-  const handleReportScore = () => {
-    if (gameState.gameState === 'reportScore') {
-      setGameState((prevState: any) => ({
-        ...prevState,
-        gameState: 'ended',
-      }));
-    }
-  };
-
-  const formatTime = (seconds: number) => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
-  };
-
-  const handleGameEnd = async () => {
-    // Update the game state to 'ended'
-    setGameState((prevState: any) => ({
-      ...prevState,
-      gameState: 'ended',
-    }));
-
-    // Save the game result
-    try {
-      const token = localStorage.getItem('token');
-      const gameResult = {
-        mode: gameMode,
-        blueScore: gameState.blueScore,
-        redScore: gameState.redScore,
-        players: players.map(p => p.userId),
-        endTime: new Date().toISOString(),
-        location: fieldLocation.name,
-      };
-
-      const response = await axios.post(`${API_BASE_URL}/api/game/result`, gameResult, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      console.log('Game result saved:', response.data);
-
-      localStorage.setItem('gameState', JSON.stringify({
-        ...JSON.parse(localStorage.getItem('gameState') || '{}'),
-        gameEnded: true
-      }));
-
-      onBackFromGame(true); // Pass true to indicate a game just ended
-    } catch (error) {
-      console.error('Failed to save game result:', error);
-      alert('Failed to save game result. The game has ended, but it may not appear in your recent games.');
-      onBackFromGame(true);
-    }
-  };
-
   if (isLoading) {
     return <div>Loading...</div>;
   }
@@ -464,11 +455,16 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
               <div className={`w-48 h-48 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative`}>
                 {userPlayer.profilePicture ? (
                   <Image
-                    src={userPlayer.profilePicture}
+                    src={getProfilePictureUrl(userPlayer.profilePicture) || '/default-avatar.jpg'}
                     alt={userPlayer.name}
                     layout="fill"
                     objectFit="cover"
                     className="rounded-full"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.onerror = null;
+                      target.src = '/default-avatar.jpg';
+                    }}
                   />
                 ) : (
                   <div className="w-full h-full bg-gray-200 flex items-center justify-center">
@@ -662,7 +658,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
                                 <Image
-                                  src={getPlayerImage(player)}
+                                  src={getProfilePictureUrl(player.profilePicture)}
                                   alt={player.name}
                                   width={40}
                                   height={40}
@@ -688,7 +684,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
                                 <Image
-                                  src={getPlayerImage(player)}
+                                  src={getProfilePictureUrl(player.profilePicture)}
                                   alt={player.name}
                                   width={40}
                                   height={40}

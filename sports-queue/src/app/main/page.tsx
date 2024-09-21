@@ -212,11 +212,11 @@ export default function MainScreen() {
   const toggleQueue = async () => {
     console.log('Toggle Queue called. Current state:', { queueStatus, isGameInProgress, gameState });
     
-    if (isGameInProgress) {
-      console.log('Game in progress, returning to game');
-      handleReturnToGame();
-      return;
-    }
+    // Clear existing game state
+    setInGame(false);
+    setIsGameInProgress(false);
+    setMatch(null);
+    localStorage.removeItem('gameState');
 
     await checkPenaltyStatus();
 
@@ -248,7 +248,7 @@ export default function MainScreen() {
             lobbyTime: 0,
             gameEnded: false,
             savedAt: new Date().toISOString(),
-            matchId: response.data.match.id // Save the match ID (which is now the user's ID)
+            matchId: response.data.match.id
           };
           console.log('Saving game state:', gameStateToSave);
           localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
@@ -266,10 +266,11 @@ export default function MainScreen() {
         console.error('Detailed error in joining queue:', error);
         if (axios.isAxiosError(error)) {
           console.error('Axios error details:', error.response?.data);
-          alert(error.response?.data?.error || 'Failed to join queue. Please try again.');
+          alert(`Failed to join queue: ${error.response?.data?.error || 'Unknown error'}. Please try again.`);
         } else {
           alert('An unexpected error occurred. Please try again.');
         }
+        setQueueStatus('idle');
       }
     } else if (queueStatus === 'queuing') {
       try {
