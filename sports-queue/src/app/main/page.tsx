@@ -99,7 +99,7 @@ interface Player {
 }
 
 export default function MainScreen() {
-  const { user, isLoading } = useContext(UserContext);
+  const { user, isLoading, initializeUser } = useContext(UserContext);
   const router = useRouter();
   const { latitude, longitude, error: geoError } = useGeolocation();
 
@@ -675,6 +675,7 @@ export default function MainScreen() {
     }
 
     const initializeApp = async () => {
+      await initializeUser(); // Re-initialize user on component mount
       await checkPenaltyStatus();
       await fetchUserProfile();
       await fetchFriends();
@@ -688,7 +689,7 @@ export default function MainScreen() {
     }, 60000);
 
     return () => clearInterval(intervalId);
-  }, [router]);
+  }, [router, initializeUser]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;

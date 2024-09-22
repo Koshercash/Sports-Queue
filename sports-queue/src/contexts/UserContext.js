@@ -36,6 +36,7 @@ export const UserProvider = ({ children }) => {
         const userData = {
           ...decodedToken,
           ...userProfile,
+          id: userProfile.id, // Ensure we're using the correct ID from the profile
           isAdmin: decodedToken.isAdmin || false
         };
         console.log('Setting user data:', userData);
@@ -54,13 +55,16 @@ export const UserProvider = ({ children }) => {
 
   const login = async (token) => {
     console.log('Login called with token:', token);
+    localStorage.clear(); // Clear all localStorage data
+    sessionStorage.clear(); // Clear all sessionStorage data
     localStorage.setItem('token', token);
     await initializeUser();
   };
 
   const logout = () => {
     console.log('Logout called');
-    localStorage.removeItem('token');
+    localStorage.clear(); // Clear all localStorage data
+    sessionStorage.clear(); // Clear all sessionStorage data
     setUser(null);
   };
 

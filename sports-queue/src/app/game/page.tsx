@@ -15,6 +15,7 @@ import { useGameState } from '@/components/GameStateProvider'  // Import useGame
 import { InteractableProfilePicture } from '../../components/InteractableProfilePicture';
 import { API_BASE_URL } from '../../config/api';
 import { UserContext } from '../../contexts/UserContext';
+import io, { Socket } from 'socket.io-client';
 
 // If useGameState and API_BASE_URL are not available, you'll need to create these
 // For now, let's create placeholder versions:
@@ -70,6 +71,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   const [reportReason, setReportReason] = useState<string | null>(null);
   const [lobbyTime, setLobbyTime] = useState(0);
   const [userPlayer, setUserPlayer] = useState<MatchPlayer | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
 
   const players = match ? [...match.team1, ...match.team2] : [];
 
@@ -290,6 +292,26 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     }
   };
 
+  const initializeNewGameState = () => {
+    const newGameState = {
+      gameState: 'lobby',
+      totalGameTime: 0,
+      gameTime: 0,
+      reportScoreTime: 0,
+      blueScore: 0,
+      redScore: 0,
+      halfTimeOccurred: false,
+      isReady: false,
+      readyCount: 0,
+      gameStartTime: null,
+      lobbyTime: 0,
+      matchId: user?.id,
+      userId: user?.id,
+    };
+    setGameState(newGameState);
+    localStorage.setItem('gameState', JSON.stringify(newGameState));
+  };
+
   useEffect(() => {
     const loadUser = async () => {
       if (!user && !isLoading) {
@@ -305,38 +327,34 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     console.log('Current user from context:', user);
     console.log('Current userId prop:', currentUserId);
     
-    // Load game state from localStorage on component mount
     const savedGameStateString = localStorage.getItem('gameState');
-    if (savedGameStateString) {
-      const savedGameState = JSON.parse(savedGameStateString);
-      console.log('Loaded game state:', savedGameState);
-      setGameState({
-        ...savedGameState,
-        gameState: savedGameState.gameState || 'lobby',
-        lobbyTime: savedGameState.lobbyTime || 0,
-        matchId: currentUserId, // Use the current user's ID as the match ID
-      });
-      setLobbyTime(savedGameState.lobbyTime || 0);
-      if (savedGameState.match) {
-        console.log('Setting match from saved state:', savedGameState.match);
-        setMatch(savedGameState.match);
+    
+    if (user) {
+      if (savedGameStateString) {
+        const savedGameState = JSON.parse(savedGameStateString);
+        console.log('Loaded game state:', savedGameState);
+        
+        if (savedGameState.userId === user.id) {
+          setGameState({
+            ...savedGameState,
+            gameState: savedGameState.gameState || 'lobby',
+            lobbyTime: savedGameState.lobbyTime || 0,
+            matchId: user.id,
+          });
+          setLobbyTime(savedGameState.lobbyTime || 0);
+          if (savedGameState.match) {
+            console.log('Setting match from saved state:', savedGameState.match);
+            setMatch(savedGameState.match);
+          }
+        } else {
+          console.log('Saved game state belongs to a different user. Clearing...');
+          localStorage.removeItem('gameState');
+          initializeNewGameState();
+        }
+      } else {
+        console.log('No saved game state found, initializing new state');
+        initializeNewGameState();
       }
-    } else {
-      console.log('No saved game state found, initializing new state');
-      setGameState({
-        gameState: 'lobby',
-        totalGameTime: 0,
-        gameTime: 0,
-        reportScoreTime: 0,
-        blueScore: 0,
-        redScore: 0,
-        halfTimeOccurred: false,
-        isReady: false,
-        readyCount: 0,
-        gameStartTime: null,
-        lobbyTime: 0,
-        matchId: currentUserId, // Use the current user's ID as the match ID
-      });
     }
 
     // Start the lobby timer
@@ -352,7 +370,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
     // Clear the timer when the component unmounts
     return () => clearInterval(timer);
-  }, [initialMatch, user, currentUserId]);
+  }, [initialMatch, user, currentUserId, setGameState]);
 
   useEffect(() => {
     console.log('Current match state:', match);
@@ -362,27 +380,41 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     if (match && user) {
       const allPlayers = [...match.team1, ...match.team2];
       console.log('All players:', allPlayers);
-      console.log('User ID to match:', user.id || user.userId);
-      let foundPlayer = allPlayers.find(p => p.userId === (user.id || user.userId));
+      console.log('User ID to match:', user.id);
+      let foundPlayer = allPlayers.find(p => p.userId === user.id);
       
-      // If the user is not found in the match, assign them to a random position
       if (!foundPlayer) {
         console.log('User not found in match. Assigning random position.');
         const randomTeam = Math.random() < 0.5 ? 'blue' : 'red';
         const randomPosition = ['goalkeeper', 'defender', 'midfielder', 'striker'][Math.floor(Math.random() * 4)];
         foundPlayer = {
-          userId: user.id || user.userId,
+          userId: user.id,
           name: user.name,
           position: randomPosition,
           team: randomTeam,
           profilePicture: user.profilePicture
         };
+        
+        // Update the match with the new player
+        const updatedMatch = {
+          ...match,
+          [randomTeam === 'blue' ? 'team1' : 'team2']: [
+            ...(randomTeam === 'blue' ? match.team1 : match.team2),
+            foundPlayer
+          ]
+        };
+        setMatch(updatedMatch);
+        
+        // Emit the updated match to all players
+        if (socket) {
+          socket.emit('updateGameState', match.id, updatedMatch);
+        }
       }
       
       console.log('Found or assigned user player:', foundPlayer);
       setUserPlayer(foundPlayer);
     }
-  }, [match, user]);
+  }, [match, user, socket]);
 
   const handleBackClick = () => {
     console.log('Back button clicked');
@@ -395,6 +427,33 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     };
     localStorage.setItem('gameState', JSON.stringify(currentGameState));
     onBackFromGame();
+  };
+
+  useEffect(() => {
+    const newSocket = io(`${API_BASE_URL}`);
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (socket && match && user) {
+      socket.emit('joinGame', match.id, user.id);
+
+      socket.on('gameStateUpdated', (updatedGameState: any) => {
+        setGameState(updatedGameState);
+        setMatch(updatedGameState);
+      });
+    }
+  }, [socket, match, user]);
+
+  const updateGameState = (newState: any) => {
+    setGameState(newState);
+    if (socket && match) {
+      socket.emit('updateGameState', match.id, newState);
+    }
   };
 
   if (isLoading) {

@@ -10,6 +10,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import rateLimit from 'express-rate-limit';
 import Joi from 'joi';
+import session from 'express-session';
+import MongoStore from 'connect-mongo';
+import http from 'http';
+import { Server } from 'socket.io';
 
 dotenv.config();
 
@@ -18,6 +22,13 @@ const __dirname = path.dirname(__filename);
 const upload = multer({ dest: 'uploads/' });
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: 'http://localhost:3000',
+    methods: ['GET', 'POST']
+  }
+});
 
 app.use(express.json());
 app.use(cors({
@@ -34,6 +45,19 @@ async function startServer() {
   await mongoose.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
 
   console.log('Connected to in-memory MongoDB');
+
+  // Set up session middleware
+  app.use(session({
+    secret: process.env.SESSION_SECRET || 'your_session_secret',
+    resave: false,
+    saveUninitialized: false,
+    store: MongoStore.create({ mongoUrl: uri }),
+    cookie: {
+      maxAge: 1000 * 60 * 60 * 24, // 1 day
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    }
+  }));
 
   const UserSchema = new mongoose.Schema({
     isAdmin: { type: Boolean, default: false },
@@ -309,10 +333,21 @@ async function startServer() {
         { userId: user._id, isAdmin: user.isAdmin },
         process.env.JWT_SECRET || 'your_jwt_secret'
       );
+      req.session.userId = user._id;
       res.json({ token });
     } catch (error) {
       res.status(400).json({ error: 'Login failed' });
     }
+  });
+
+  // Add a logout route
+  app.post('/api/logout', (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ error: 'Could not log out, please try again' });
+      }
+      res.json({ message: 'Logged out successfully' });
+    });
   });
 
   const adminMiddleware = async (req, res, next) => {
@@ -1285,9 +1320,44 @@ return {
       res.status(500).json({ error: 'Failed to fetch match history' });
     }
   });
-
+  io.on('connection', (socket) => {
+    console.log('A user connected');
+  
+    socket.on('joinGame', async (gameId, userId) => {
+      socket.join(gameId);
+      console.log(`User ${userId} joined game: ${gameId}`);
+  
+      try {
+        const game = await Game.findById(gameId);
+        if (game) {
+          const playerIndex = game.players.findIndex(p => p.toString() === userId);
+          if (playerIndex === -1) {
+            game.players.push(userId);
+            await game.save();
+          }
+          io.to(gameId).emit('gameStateUpdated', game);
+        }
+      } catch (error) {
+        console.error('Error updating game with new user:', error);
+      }
+    });
+  
+    socket.on('updateGameState', async (gameId, gameState) => {
+      try {
+        await Game.findByIdAndUpdate(gameId, gameState);
+        io.to(gameId).emit('gameStateUpdated', gameState);
+        console.log(`Game state updated for game: ${gameId}`);
+      } catch (error) {
+        console.error('Error updating game state:', error);
+      }
+    });
+  
+    socket.on('disconnect', () => {
+      console.log('User disconnected');
+    });
+  });
   const PORT = process.env.PORT || 3002;
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
 
