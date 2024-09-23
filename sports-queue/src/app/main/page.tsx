@@ -868,18 +868,18 @@ export default function MainScreen() {
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-[425px]">
                     <DialogHeader>
-                      <DialogTitle>Info</DialogTitle>
-                      <DialogDescription>
-                        <p>Welcome to Sports Queue!</p>
-                        <p>Here's how it works:</p>
-                        <ol className="list-decimal pl-5">
-                          <li>Click the "Join Queue" button to find a game.</li>
-                          <li>Once you're matched, you'll be taken to the game screen.</li>
-                          <li>Enjoy your game!</li>
-                        </ol>
-                      </DialogDescription>
-                    </DialogHeader>
-                  </DialogContent>
+                    <DialogTitle>Welcome to Sports Queue!</DialogTitle>
+              <DialogDescription>
+                <p className="mb-2">The best way to find your individual skill level, and quickly find competitive games near you.</p>
+                <h3 className="font-bold mt-4 mb-2">Rules:</h3>
+                <p className="mb-2">Sports Queue is entirely player ran, so it costs no money. However, for games you will need a red or blue jersey/penny or clothes to easily tell teams apart!</p>
+                <p className="mb-2">To make sure game scores are correctly reported, enter the correct game score after the game, after 30 minutes the game will be concluded, and the highest vote will be used.</p>
+                <h3 className="font-bold mt-4 mb-2">Cheating/Unfair Play:</h3>
+                <p className="mb-2">If you are reported by 3 or more players in a single game, or excessively reported over multiple, action will be taken. This can be for excessive fouling, breaking the rules of the game, or harassing a player. Any physical fights or purposely conspiring to report the wrong score will be met with a permanent ban.</p>
+                <p className="mb-2">Try to limit the roughness, focus on your skills as well as positioning and having fun! People may want to play many games so please do your best to not injure anyone else.</p>
+              </DialogDescription>
+            </DialogHeader>
+          </DialogContent>
                 </Dialog>
               </div>
             </header>

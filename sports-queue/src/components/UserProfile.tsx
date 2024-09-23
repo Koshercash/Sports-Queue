@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { InteractableProfilePicture } from './InteractableProfilePicture';
 import { Button } from './ui/button';
+import Image from 'next/image';
 
 interface UserProfileProps {
   id: string;
@@ -53,12 +54,13 @@ export function UserProfile({
   return (
     <div className="flex flex-col space-y-6">
       <div className="flex flex-col md:flex-row items-start space-y-4 md:space-y-0 md:space-x-6">
-        <div className="flex-shrink-0 w-40 h-40"> {/* Adjusted size */}
-          <InteractableProfilePicture
-            currentImage={profilePicture || ''}
-            onImageChange={isCurrentUser && isEditable ? onProfilePictureChange : undefined}
-            size="custom"
-            customSize="w-40 h-40" // Match the container size
+        <div className="flex-shrink-0 w-40 h-40">
+          <Image
+            src={profilePicture || '/default-avatar.jpg'}
+            alt={`${name}'s profile picture`}
+            width={160}
+            height={160}
+            className="rounded-full object-cover"
           />
         </div>
         <div className="flex-grow">

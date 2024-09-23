@@ -1,78 +1,53 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import Image from 'next/image';
 
 interface InteractableProfilePictureProps {
   currentImage: string | null;
   onImageChange?: (file: File) => void;
   onClick?: () => void;
-  priority?: boolean;
-  isFriend?: boolean;
-  onRemoveFriend?: () => void;
   size?: 'small' | 'medium' | 'large' | 'custom';
   customSize?: string;
 }
 
-export const InteractableProfilePicture: React.FC<InteractableProfilePictureProps> = ({
+export function InteractableProfilePicture({
   currentImage,
   onImageChange,
   onClick,
-  priority = false,
   size = 'medium',
-  customSize,
-}) => {
-  console.log('InteractableProfilePicture received image:', currentImage);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleClick = () => {
-    if (onClick) {
-      onClick();
-    } else if (onImageChange && fileInputRef.current) {
-      fileInputRef.current.click();
-    }
-  };
-
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file && onImageChange) {
-      onImageChange(file);
-    }
-  };
-
+  customSize
+}: InteractableProfilePictureProps) {
   const sizeClasses = {
     small: 'w-10 h-10',
-    medium: 'w-16 h-16',
+    medium: 'w-20 h-20',
     large: 'w-32 h-32',
-    custom: customSize || 'w-32 h-32', // Default to large if no custom size provided
+    custom: customSize
   };
 
+  const imageSize = size === 'custom' ? parseInt(customSize?.split('w-')[1] || '40', 10) : 
+    size === 'small' ? 40 : size === 'medium' ? 80 : 128;
+
   return (
-    <div 
-      className={`${sizeClasses[size]} rounded-full overflow-hidden cursor-pointer relative`} 
-      onClick={handleClick}
-    >
-      {currentImage ? (
-        <Image
-          src={currentImage}
-          alt="Profile"
-          layout="fill"
-          objectFit="cover"
-          priority={priority}
-        />
-      ) : (
-        <div className="w-full h-full bg-gray-300 flex items-center justify-center">
-          <span className="text-gray-500 text-sm">No Image</span>
-        </div>
-      )}
+    <div className={`relative ${sizeClasses[size]} rounded-full overflow-hidden`}>
+      <Image
+        src={currentImage || '/default-avatar.jpg'}
+        alt="Profile picture"
+        width={imageSize}
+        height={imageSize}
+        className="object-cover"
+        onClick={onClick}
+      />
       {onImageChange && (
         <input
           type="file"
-          ref={fileInputRef}
-          onChange={handleFileChange}
           accept="image/*"
-          className="hidden"
+          onChange={(e) => {
+            if (e.target.files && e.target.files[0]) {
+              onImageChange(e.target.files[0]);
+            }
+          }}
+          className="absolute inset-0 opacity-0 cursor-pointer"
         />
       )}
     </div>
   );
-};
+}
