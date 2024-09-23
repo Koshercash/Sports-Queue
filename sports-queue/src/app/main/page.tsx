@@ -819,6 +819,12 @@ export default function MainScreen() {
   useEffect(() => {
     console.log('Current user in UserContext:', user);
   }, [user]);
+  
+  useEffect(() => {
+    if (activeTab === 'leaderboard') {
+      fetchLeaderboard(1);
+    }
+  }, [activeTab, fetchLeaderboard]);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
