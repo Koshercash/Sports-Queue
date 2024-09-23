@@ -23,6 +23,7 @@ interface MatchPlayer {
   userId: string;
   name: string;
   position: string;
+  assignedPosition: 'primary' | 'secondary';
   team: 'blue' | 'red';
   profilePicture?: string | null;
 }
@@ -45,6 +46,7 @@ interface UserProfileData {
   name: string;
   sex: string;
   position: string;
+  secondaryPosition: string;
   dateOfBirth: string;
   profilePicture: string | null;
   isCurrentUser: boolean;
@@ -365,15 +367,21 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       console.log('User ID to match:', user.id || user.userId);
       let foundPlayer = allPlayers.find(p => p.userId === (user.id || user.userId));
       
-      // If the user is not found in the match, assign them to a random position
-      if (!foundPlayer) {
+      if (foundPlayer) {
+        // If the player is found in the match, use the assigned position
+        const correctPosition = foundPlayer.assignedPosition === 'primary' ? user.position : user.secondaryPosition;
+        foundPlayer = {
+          ...foundPlayer,
+          position: correctPosition
+        };
+      } else {
         console.log('User not found in match. Assigning random position.');
         const randomTeam = Math.random() < 0.5 ? 'blue' : 'red';
-        const randomPosition = ['goalkeeper', 'defender', 'midfielder', 'striker'][Math.floor(Math.random() * 4)];
         foundPlayer = {
           userId: user.id || user.userId,
           name: user.name,
-          position: randomPosition,
+          position: user.position,
+          assignedPosition: 'primary',
           team: randomTeam,
           profilePicture: user.profilePicture
         };
@@ -472,7 +480,9 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                   </div>
                 )}
               </div>
-              <p className="text-4xl font-bold text-white">{userPlayer.position}</p>
+              <p className="text-4xl font-bold text-white">
+                {userPlayer.position} ({userPlayer.assignedPosition === 'primary' ? 'Primary' : 'Secondary'})
+              </p>
             </div>
           )}
 
@@ -720,6 +730,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
               onBioChange={undefined}
               isEditable={false}
               cityTown={selectedProfile.cityTown}
+              secondaryPosition={selectedProfile.secondaryPosition || ''} // Add this line
             />
             <div className="flex justify-between mt-4">
               <Button onClick={() => setSelectedProfile(null)}>Close</Button>

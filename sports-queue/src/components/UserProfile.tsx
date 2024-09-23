@@ -8,6 +8,7 @@ interface UserProfileProps {
   name: string;
   sex: string;
   position: string;
+  secondaryPosition: string;
   dateOfBirth: string;
   profilePicture: string | null;
   isCurrentUser: boolean;
@@ -26,6 +27,7 @@ export function UserProfile({
   name, 
   sex, 
   position, 
+  secondaryPosition,
   dateOfBirth, 
   profilePicture, 
   isCurrentUser, 
@@ -54,18 +56,27 @@ export function UserProfile({
   return (
     <div className="flex flex-col space-y-6">
       <div className="flex flex-col md:flex-row items-start space-y-4 md:space-y-0 md:space-x-6">
-        <div className="flex-shrink-0 w-40 h-40">
-          <Image
-            src={profilePicture || '/default-avatar.jpg'}
-            alt={`${name}'s profile picture`}
-            width={160}
-            height={160}
-            className="rounded-full object-cover"
-          />
+        <div className="flex-shrink-0 w-40 h-40 relative">
+          {isEditable && onProfilePictureChange ? (
+            <InteractableProfilePicture
+              currentImage={profilePicture || '/default-avatar.jpg'}
+              onImageChange={onProfilePictureChange}
+              size="large"
+            />
+          ) : (
+            <Image
+              src={profilePicture || '/default-avatar.jpg'}
+              alt={`${name}'s profile picture`}
+              width={160}
+              height={160}
+              className="rounded-full object-cover"
+            />
+          )}
         </div>
         <div className="flex-grow">
           <h2 className="text-2xl font-bold">{name}</h2>
-          <p><strong>Position:</strong> {position}</p>
+          <p><strong>Primary Position:</strong> {position}</p>
+          <p><strong>Secondary Position:</strong> {secondaryPosition}</p>
           <p><strong>City/Town:</strong> {cityTown}</p>
           {isCurrentUser && <p><strong>Sex:</strong> {sex}</p>}
           <p><strong>Date of Birth:</strong> {new Date(dateOfBirth).toLocaleDateString()}</p>

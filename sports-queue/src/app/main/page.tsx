@@ -28,6 +28,7 @@ interface UserProfile {
   name: string;
   sex: string;
   position: string;
+  secondaryPosition: string;
   skillLevel: string;
   dateOfBirth: string;
   profilePicture: string | null;
@@ -47,6 +48,7 @@ interface MatchPlayer {
   userId: string;
   name: string;
   position: string;
+  assignedPosition: 'primary' | 'secondary';
   team: 'blue' | 'red';
   profilePicture?: string | null;
 }
@@ -62,6 +64,7 @@ interface UserProfileData {
   name: string;
   sex: string;
   position: string;
+  secondaryPosition: string;
   dateOfBirth: string;
   profilePicture: string | null;
   isCurrentUser: boolean;
@@ -94,6 +97,7 @@ interface Player {
   id: string;
   name: string;
   position: string;
+  secondaryPosition: string;
   team: 'blue' | 'red';
   profilePicture?: string | null;
 }

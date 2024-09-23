@@ -24,6 +24,7 @@ export default function LoginScreen() {
     idPicture: null as File | null,
     sex: '',
     position: '',
+    secondaryPosition: '',
     skillLevel: '',
     dateOfBirth: '',
     profilePicture: null as File | null,
@@ -77,7 +78,7 @@ export default function LoginScreen() {
       case 3:
         return formData.sex
       case 4:
-        return formData.position
+        return formData.position && formData.secondaryPosition && formData.position !== formData.secondaryPosition
       case 5:
         return formData.skillLevel
       case 6:
@@ -113,14 +114,16 @@ export default function LoginScreen() {
           if (value !== null) {
             if (key === 'dateOfBirth') {
               formDataToSend.append(key, new Date(value as string).toISOString());
+            } else if (key === 'secondaryPosition') {
+              // Ensure secondaryPosition is a string
+              formDataToSend.append(key, value as string);
             } else {
               formDataToSend.append(key, value as string | Blob);
             }
           }
         });
 
-        // Explicitly add cityTown to ensure it's included
-        formDataToSend.append('cityTown', formData.cityTown);
+        console.log('Form data being sent:', Object.fromEntries(formDataToSend));
 
         const response = await axios.post('http://localhost:3002/api/register', formDataToSend, {
           withCredentials: true,
@@ -156,6 +159,22 @@ export default function LoginScreen() {
     } catch (error) {
       console.error('Login failed:', error);
       alert('Login failed. Please check your credentials.');
+    }
+  };
+
+  const handlePositionChange = (value: string, isSecondary: boolean) => {
+    if (isSecondary) {
+      if (value === formData.position) {
+        alert("Secondary position cannot be the same as primary position.");
+        return;
+      }
+      setFormData(prev => ({ ...prev, secondaryPosition: value }));
+    } else {
+      if (value === formData.secondaryPosition) {
+        setFormData(prev => ({ ...prev, position: value, secondaryPosition: '' }));
+      } else {
+        setFormData(prev => ({ ...prev, position: value }));
+      }
     }
   };
 
@@ -220,22 +239,46 @@ export default function LoginScreen() {
               </div>
             )}
             {step === 4 && (
-              <div className="w-full max-w-md space-y-4">
-                <Label>Preferred Position</Label>
-                <Select onValueChange={(value) => setFormData((prev) => ({ ...prev, position: value }))}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select position" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="goalkeeper">Goalkeeper</SelectItem>
-                    <SelectItem value="fullback">Full Back</SelectItem>
-                    <SelectItem value="centerback">Center Back</SelectItem>
-                    <SelectItem value="winger">Winger</SelectItem>
-                    <SelectItem value="midfielder">Midfielder</SelectItem>
-                    <SelectItem value="striker">Striker</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button className="w-full" onClick={handleNext}>Next</Button>
+              <div className="w-full max-w-md space-y-8">
+                <div className="space-y-2 bg-white p-4 rounded-lg shadow-md relative z-20">
+                  <Label className="text-lg font-semibold">Primary Position</Label>
+                  <Select onValueChange={(value) => handlePositionChange(value, false)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select primary position" />
+                    </SelectTrigger>
+                    <div className="z-30">
+                      <SelectContent>
+                        {["goalkeeper", "fullback", "centerback", "winger", "midfielder", "striker"].filter(pos => pos !== formData.secondaryPosition).map((pos) => (
+                          <SelectItem key={pos} value={pos}>
+                            {pos.charAt(0).toUpperCase() + pos.slice(1)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </div>
+                  </Select>
+                </div>
+                <div className="space-y-2 bg-white p-4 rounded-lg shadow-md relative z-10">
+                  <Label className="text-lg font-semibold">Secondary Position</Label>
+                  <Select onValueChange={(value) => handlePositionChange(value, true)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select secondary position" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {["goalkeeper", "fullback", "centerback", "winger", "midfielder", "striker"].filter(pos => pos !== formData.position).map((pos) => (
+                        <SelectItem key={pos} value={pos}>
+                          {pos.charAt(0).toUpperCase() + pos.slice(1)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button 
+                  className="w-full mt-4" 
+                  onClick={handleNext}
+                  disabled={!formData.position || !formData.secondaryPosition || formData.position === formData.secondaryPosition}
+                >
+                  Next
+                </Button>
               </div>
             )}
             {step === 5 && (
