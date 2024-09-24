@@ -75,8 +75,8 @@ export function UserProfile({
         </div>
         <div className="flex-grow">
           <h2 className="text-2xl font-bold">{name}</h2>
-          <p><strong>Primary Position:</strong> {position}</p>
-          <p><strong>Secondary Position:</strong> {secondaryPosition}</p>
+          <p><strong>Primary Position:</strong> {position || 'Not specified'}</p>
+          <p><strong>Secondary Position:</strong> {secondaryPosition || 'Not specified'}</p>
           <p><strong>City/Town:</strong> {cityTown}</p>
           {isCurrentUser && <p><strong>Sex:</strong> {sex}</p>}
           <p><strong>Date of Birth:</strong> {new Date(dateOfBirth).toLocaleDateString()}</p>

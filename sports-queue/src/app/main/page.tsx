@@ -48,6 +48,7 @@ interface MatchPlayer {
   userId: string;
   name: string;
   position: string;
+  secondaryPosition: string;
   assignedPosition: 'primary' | 'secondary';
   team: 'blue' | 'red';
   profilePicture?: string | null;

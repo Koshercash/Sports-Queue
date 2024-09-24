@@ -13,12 +13,14 @@ export const UserProvider = ({ children }) => {
 
   const fetchUserProfile = async (token) => {
     try {
+      console.log('Fetching user profile from:', `${API_BASE_URL}/api/user-profile`);
       const response = await axios.get(`${API_BASE_URL}/api/user-profile`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      console.log('User profile response:', response.data);
       return response.data;
     } catch (error) {
-      console.error('Error fetching user profile:', error);
+      console.error('Error fetching user profile:', error.response ? error.response.data : error.message);
       throw error;
     }
   };
@@ -32,18 +34,23 @@ export const UserProvider = ({ children }) => {
         console.log('Decoded token:', decodedToken);
         
         const userProfile = await fetchUserProfile(token);
+        console.log('Fetched user profile:', userProfile);
         
         const userData = {
           ...decodedToken,
           ...userProfile,
+          secondaryPosition: userProfile.secondaryPosition || '',
           isAdmin: decodedToken.isAdmin || false
         };
         console.log('Setting user data:', userData);
+        console.log('Secondary position:', userData.secondaryPosition);
         setUser(userData);
       } catch (error) {
         console.error('Error initializing user:', error);
         localStorage.removeItem('token');
       }
+    } else {
+      console.log('No token found, user will be null');
     }
     setIsLoading(false);
   };

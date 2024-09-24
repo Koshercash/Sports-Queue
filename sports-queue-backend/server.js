@@ -43,6 +43,7 @@ async function startServer() {
     phone: String,
     sex: String,
     position: String,
+    secondaryPosition: String, // Add this line
     skillLevel: String,
     mmr5v5: Number,
     mmr11v11: Number,
@@ -235,10 +236,10 @@ async function startServer() {
     { name: 'idPicture', maxCount: 1 }
   ]), async (req, res) => {
     try {
-      const { name, email, password, phone, sex, position, skillLevel, dateOfBirth, cityTown } = req.body; // Add cityTown here
+      const { name, email, password, phone, sex, position, secondaryPosition, skillLevel, dateOfBirth, cityTown } = req.body; // Add cityTown here
       
       // Log received data for debugging
-      console.log('Received registration data:', { name, email, phone, sex, position, skillLevel, dateOfBirth, cityTown });
+      console.log('Received registration data:', { name, email, phone, sex, position,secondaryPosition, skillLevel, dateOfBirth, cityTown });
       console.log('Files:', req.files);
 
       // Check if user is over 16
@@ -275,6 +276,7 @@ async function startServer() {
         phone,
         sex,
         position,
+        secondaryPosition,
         skillLevel,
         mmr5v5: mmr,
         mmr11v11: mmr,
@@ -285,7 +287,11 @@ async function startServer() {
       });
 
       await user.save();
-      const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET || 'your_jwt_secret', { expiresIn: '1d' });
+      const token = jwt.sign(
+        { userId: user._id, isAdmin: user.isAdmin },
+        process.env.JWT_SECRET || 'your_jwt_secret',
+        { expiresIn: '1d' }
+      );
       res.status(201).json({ token });
     } catch (error) {
       console.error('Detailed registration error:', error);
@@ -307,7 +313,8 @@ async function startServer() {
       }
       const token = jwt.sign(
         { userId: user._id, isAdmin: user.isAdmin },
-        process.env.JWT_SECRET || 'your_jwt_secret'
+        process.env.JWT_SECRET || 'your_jwt_secret',
+        { expiresIn: '1d' }
       );
       res.json({ token });
     } catch (error) {
@@ -335,7 +342,7 @@ async function startServer() {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
       req.userId = decoded.userId;
-  
+      console.log('User ID set in authMiddleware:', req.userId);
       // Check if user is banned
       const ban = await Ban.findOne({ user: req.userId });
       if (ban && ban.expiresAt && ban.expiresAt > new Date()) {
@@ -360,14 +367,15 @@ async function startServer() {
         email: user.email,
         phone: user.phone,
         sex: user.sex,
-        position: user.position,
+        position: user.position || '',
+        secondaryPosition: user.secondaryPosition || '',
         skillLevel: user.skillLevel,
         dateOfBirth: user.dateOfBirth,
         profilePicture: user.profilePicturePath ? `/uploads/${user.profilePicturePath}` : null,
         mmr5v5: user.mmr5v5,
         mmr11v11: user.mmr11v11,
         bio: user.bio,
-        cityTown: user.cityTown, // Add this line
+        cityTown: user.cityTown,
       });
     } catch (error) {
       console.error('Error fetching user profile:', error);
@@ -844,6 +852,7 @@ async function createMatch(gameMode, user) {
       userId: player.userId._id.toString(),
       name: player.userId.name,
       position: player.userId.position,
+      secondaryPosition: player.userId.secondaryPosition,
       profilePicture: player.userId.profilePicturePath ? `/uploads/${player.userId.profilePicturePath}` : null,
       mmr: player.userId[mmrField] || 1000,
       team: i % 2 === 0 ? 'blue' : 'red'
@@ -908,6 +917,7 @@ return {
         phone: user.phone,
         sex: user.sex,
         position: user.position,
+        secondaryPosition: user.secondaryPosition,
         skillLevel: user.skillLevel,
         dateOfBirth: user.dateOfBirth,
         profilePicture: user.profilePicturePath ? `/uploads/${user.profilePicturePath}` : null,

@@ -23,6 +23,7 @@ interface MatchPlayer {
   userId: string;
   name: string;
   position: string;
+  secondaryPosition: string;
   assignedPosition: 'primary' | 'secondary';
   team: 'blue' | 'red';
   profilePicture?: string | null;
@@ -368,20 +369,21 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       let foundPlayer = allPlayers.find(p => p.userId === (user.id || user.userId));
       
       if (foundPlayer) {
-        // If the player is found in the match, use the assigned position
-        const correctPosition = foundPlayer.assignedPosition === 'primary' ? user.position : user.secondaryPosition;
         foundPlayer = {
           ...foundPlayer,
-          position: correctPosition
+          position: foundPlayer.assignedPosition === 'primary' ? (user.position || 'Not specified') : (user.secondaryPosition || 'Not specified'),
+          secondaryPosition: user.secondaryPosition || 'Not specified'
         };
       } else {
         console.log('User not found in match. Assigning random position.');
         const randomTeam = Math.random() < 0.5 ? 'blue' : 'red';
+        const assignedPosition = Math.random() < 0.5 ? 'primary' : 'secondary';
         foundPlayer = {
           userId: user.id || user.userId,
           name: user.name,
-          position: user.position,
-          assignedPosition: 'primary',
+          position: assignedPosition === 'primary' ? (user.position || 'Not specified') : (user.secondaryPosition || 'Not specified'),
+          secondaryPosition: user.secondaryPosition || 'Not specified',
+          assignedPosition: assignedPosition,
           team: randomTeam,
           profilePicture: user.profilePicture
         };
@@ -679,7 +681,9 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                               )}
                             </div>
                             <span className="text-blue-600">{player.name}</span>
-                            <span className="text-sm text-gray-500">({player.position})</span>
+                            <span className="text-sm text-gray-500">
+                              ({player.assignedPosition === 'primary' ? player.position : player.secondaryPosition})
+                            </span>
                           </li>
                         ))}
                       </ul>
@@ -705,7 +709,9 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                               )}
                             </div>
                             <span className="text-red-600">{player.name}</span>
-                            <span className="text-sm text-gray-500">({player.position})</span>
+                            <span className="text-sm text-gray-500">
+                              ({player.assignedPosition === 'primary' ? player.position : player.secondaryPosition})
+                            </span>
                           </li>
                         ))}
                       </ul>
@@ -730,7 +736,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
               onBioChange={undefined}
               isEditable={false}
               cityTown={selectedProfile.cityTown}
-              secondaryPosition={selectedProfile.secondaryPosition || ''} // Add this line
+              secondaryPosition={selectedProfile.secondaryPosition || ''}
             />
             <div className="flex justify-between mt-4">
               <Button onClick={() => setSelectedProfile(null)}>Close</Button>
