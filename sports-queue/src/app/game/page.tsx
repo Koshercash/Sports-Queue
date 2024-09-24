@@ -665,8 +665,8 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <h4 className="font-semibold text-blue-600 mb-2">Blue Team</h4>
                     <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
-                        {match && match.team1.map((player) => (
-                          <li key={player.userId} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
+                        {match && match.team1.map((player, index) => (
+                          <li key={`blue-${player.userId}-${index}`} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
                                 <Image
@@ -693,8 +693,8 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <h4 className="font-semibold text-red-600 mb-2">Red Team</h4>
                     <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
-                        {match && match.team2.map((player) => (
-                          <li key={player.userId} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
+                        {match && match.team2.map((player, index) => (
+                          <li key={`red-${player.userId}-${index}`} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
                                 <Image

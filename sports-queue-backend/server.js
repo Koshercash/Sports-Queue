@@ -803,89 +803,133 @@ async function startServer() {
   });
 
  
-async function createMatch(gameMode, user) {
-  const mmrField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
-  const playerCount = gameMode === '5v5' ? 10 : 22;
+  async function createMatch(gameMode, user) {
+    const mmrField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
+    const playerCount = gameMode === '5v5' ? 10 : 22;
+    const maxIndividualMMRDifference = 400;
+    const maxTotalMMRDifference = 600;
+    
+    let players = await Queue.find({ gameMode })
+      .populate('userId')
+      .sort('timestamp')
+      .limit(playerCount * 2); // Fetch more players to allow for MMR filtering
   
-  let players = await Queue.find({ gameMode })
-    .populate('userId')
-    .sort('timestamp')
-    .limit(playerCount);
-
     console.log(`Found ${players.length} players in queue for ${gameMode}`);
-
-  // If not enough players in queue, add dummy players
-  if (players.length < playerCount) {
-    const dummyCount = playerCount - players.length;
-    const dummyPlayers = await User.aggregate([
-      { $match: { email: { $regex: /^dummy/ }, sex: user.sex } },
-      { $sample: { size: dummyCount } }
-    ]);
-
-    players = [
-      ...players,
-      ...dummyPlayers.map(dp => ({ userId: dp }))
-    ];
-    console.log(`Added ${dummyCount} dummy players`);
-  }
-
-  // Ensure we have enough players
-  if (players.length < playerCount) {
-    console.log('Not enough players found, including dummies');
-    return null;
-  }
-
-  // Sort players by MMR difference from the user
-  players.sort((a, b) => 
-    Math.abs((a.userId[mmrField] || 1000) - user[mmrField]) - 
-    Math.abs((b.userId[mmrField] || 1000) - user[mmrField])
-  );
-
-  const team1 = [];
-  const team2 = [];
-
-  // Distribute players to teams
-  for (let i = 0; i < players.length; i++) {
-    const player = players[i];
-    const team = i % 2 === 0 ? team1 : team2;
-    team.push({
-      userId: player.userId._id.toString(),
-      name: player.userId.name,
-      position: player.userId.position,
-      secondaryPosition: player.userId.secondaryPosition,
-      profilePicture: player.userId.profilePicturePath ? `/uploads/${player.userId.profilePicturePath}` : null,
-      mmr: player.userId[mmrField] || 1000,
-      team: i % 2 === 0 ? 'blue' : 'red'
+  
+    // Filter players within MMR range
+    players = players.filter(p => Math.abs((p.userId[mmrField] || 1000) - user[mmrField]) <= maxIndividualMMRDifference);
+  
+    // If not enough players in queue, add dummy players
+    if (players.length < playerCount) {
+      const dummyCount = playerCount - players.length;
+      const dummyPlayers = await User.aggregate([
+        { $match: { 
+          email: { $regex: /^dummy/ }, 
+          sex: user.sex,
+          [mmrField]: { 
+            $gte: user[mmrField] - maxIndividualMMRDifference, 
+            $lte: user[mmrField] + maxIndividualMMRDifference 
+          }
+        }},
+        { $sample: { size: dummyCount } }
+      ]);
+  
+      players = [
+        ...players,
+        ...dummyPlayers.map(dp => ({ userId: dp }))
+      ];
+      console.log(`Added ${dummyCount} dummy players`);
+    }
+  
+    // Ensure we have enough players
+    if (players.length < playerCount) {
+      console.log('Not enough players found, including dummies');
+      return null;
+    }
+  
+    // Sort players by MMR difference from the user
+    players.sort((a, b) => 
+      Math.abs((a.userId[mmrField] || 1000) - user[mmrField]) - 
+      Math.abs((b.userId[mmrField] || 1000) - user[mmrField])
+    );
+  
+    // Take only the required number of players
+    players = players.slice(0, playerCount);
+  
+    const team1 = [];
+    const team2 = [];
+    const positions = ['goalkeeper', 'defender', 'midfielder', 'striker'];
+    const positionCounts = {
+      '5v5': { goalkeeper: 1, defender: 1, midfielder: 2, striker: 1 },
+      '11v11': { goalkeeper: 1, defender: 4, midfielder: 4, striker: 2 }
+    };
+  
+    // Helper function to check if a position is needed
+    const isPositionNeeded = (team, position) => {
+      const count = team.filter(p => p.assignedPosition === position).length;
+      return count < positionCounts[gameMode][position];
+    };
+  
+    // Distribute players to teams
+    for (let i = 0; i < players.length; i++) {
+      const player = players[i];
+      const team = i % 2 === 0 ? team1 : team2;
+      
+      // Determine assigned position
+      let assignedPosition;
+      if (isPositionNeeded(team, player.userId.position)) {
+        assignedPosition = player.userId.position;
+      } else if (isPositionNeeded(team, player.userId.secondaryPosition)) {
+        assignedPosition = player.userId.secondaryPosition;
+      } else {
+        assignedPosition = positions.find(pos => isPositionNeeded(team, pos)) || player.userId.position;
+      }
+  
+      team.push({
+        userId: player.userId._id.toString(),
+        name: player.userId.name,
+        position: player.userId.position,
+        secondaryPosition: player.userId.secondaryPosition,
+        assignedPosition: assignedPosition,
+        profilePicture: player.userId.profilePicturePath ? `/uploads/${player.userId.profilePicturePath}` : null,
+        mmr: player.userId[mmrField] || 1000,
+        team: i % 2 === 0 ? 'blue' : 'red'
+      });
+    }
+  
+    // Check total MMR difference
+    const team1MMR = team1.reduce((sum, p) => sum + p.mmr, 0);
+    const team2MMR = team2.reduce((sum, p) => sum + p.mmr, 0);
+    if (Math.abs(team1MMR - team2MMR) > maxTotalMMRDifference) {
+      console.log('Total MMR difference too high, aborting match creation');
+      return null;
+    }
+  
+    // Remove matched players from the queue
+    await Queue.deleteMany({ userId: { $in: players.map(p => p.userId._id) } });
+  
+    // Create a new game with a new unique ID
+    const newGame = new Game({
+      players: players.map(p => p.userId._id),
+      gameMode,
+      status: 'lobby',
+      startTime: new Date()
     });
+  
+    try {
+      await newGame.save();
+      console.log(`New game created with ID: ${newGame._id}`);
+    } catch (error) {
+      console.error('Error creating new game:', error);
+      throw error;
+    }
+  
+    return { 
+      id: newGame._id.toString(),
+      team1, 
+      team2 
+    };
   }
-
-  // Remove matched players from the queue
-  await Queue.deleteMany({ userId: { $in: players.map(p => p.userId._id) } });
-
-  // Create a new game with the user's ID as the match ID
- // Create a new game with a new unique ID
- const newGame = new Game({
-  players: players.map(p => p.userId._id),
-  gameMode,
-  status: 'lobby',
-  startTime: new Date()
-});
-await newGame.save();
-
-try {
-  await newGame.save();
-  console.log(`New game created with ID: ${newGame._id}`);
-} catch (error) {
-  console.error('Error creating new game:', error);
-  throw error;
-}
-
-return { 
-  id: newGame._id.toString(),
-  team1, 
-  team2 
-};
-}
 
   // Update the /api/user/:id endpoint
   app.get('/api/user/:id', authMiddleware, async (req, res) => {
