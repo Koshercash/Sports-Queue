@@ -807,110 +807,222 @@ async function startServer() {
     const mmrField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
     const playerCount = gameMode === '5v5' ? 10 : 22;
     const maxIndividualMMRDifference = 400;
-    const maxTotalMMRDifference = 600;
-    
+    const maxTotalMMRDifference = 800;
+    console.log('createMatch function called with gameMode:', gameMode, 'and user:', user);
     let players = await Queue.find({ gameMode })
       .populate('userId')
       .sort('timestamp')
-      .limit(playerCount * 2); // Fetch more players to allow for MMR filtering
+      .limit(playerCount * 3);
   
     console.log(`Found ${players.length} players in queue for ${gameMode}`);
   
     // Filter players within MMR range
-    players = players.filter(p => Math.abs((p.userId[mmrField] || 1000) - user[mmrField]) <= maxIndividualMMRDifference);
+    const userMMR = user[mmrField] || 1000;
+    players = players.filter(p => {
+      const playerMMR = p.userId[mmrField] || 1000;
+      return Math.abs(playerMMR - userMMR) <= maxIndividualMMRDifference;
+    });
   
-    // If not enough players in queue, add dummy players
-    if (players.length < playerCount) {
-      const dummyCount = playerCount - players.length;
-      const dummyPlayers = await User.aggregate([
-        { $match: { 
-          email: { $regex: /^dummy/ }, 
+    // Add dummy players if needed
+    const addDummyPlayers = async () => {
+      const neededCount = playerCount - players.length;
+      if (neededCount > 0) {
+        const dummyPlayers = await User.find({ 
+          email: { $regex: /^dummy/ },
           sex: user.sex,
           [mmrField]: { 
-            $gte: user[mmrField] - maxIndividualMMRDifference, 
-            $lte: user[mmrField] + maxIndividualMMRDifference 
+            $gte: userMMR - maxIndividualMMRDifference, 
+            $lte: userMMR + maxIndividualMMRDifference 
           }
-        }},
-        { $sample: { size: dummyCount } }
-      ]);
+        }).limit(neededCount);
   
-      players = [
-        ...players,
-        ...dummyPlayers.map(dp => ({ userId: dp }))
-      ];
-      console.log(`Added ${dummyCount} dummy players`);
-    }
+        players = [
+          ...players,
+          ...dummyPlayers.map(dp => ({ 
+            userId: dp,
+            timestamp: new Date(),
+            gameMode: gameMode
+          }))
+        ];
+        console.log(`Added ${dummyPlayers.length} dummy players`);
+      }
+    };
   
-    // Ensure we have enough players
+    await addDummyPlayers();
     if (players.length < playerCount) {
-      console.log('Not enough players found, including dummies');
+      console.log('Not enough players to create a match');
       return null;
     }
-  
-    // Sort players by MMR difference from the user
-    players.sort((a, b) => 
-      Math.abs((a.userId[mmrField] || 1000) - user[mmrField]) - 
-      Math.abs((b.userId[mmrField] || 1000) - user[mmrField])
-    );
-  
-    // Take only the required number of players
-    players = players.slice(0, playerCount);
-  
-    const team1 = [];
-    const team2 = [];
-    const positions = ['goalkeeper', 'defender', 'midfielder', 'striker'];
-    const positionCounts = {
-      '5v5': { goalkeeper: 1, defender: 1, midfielder: 2, striker: 1 },
-      '11v11': { goalkeeper: 1, defender: 4, midfielder: 4, striker: 2 }
-    };
-  
-    // Helper function to check if a position is needed
-    const isPositionNeeded = (team, position) => {
-      const count = team.filter(p => p.assignedPosition === position).length;
-      return count < positionCounts[gameMode][position];
-    };
-  
-    // Distribute players to teams
-    for (let i = 0; i < players.length; i++) {
-      const player = players[i];
-      const team = i % 2 === 0 ? team1 : team2;
-      
-      // Determine assigned position
-      let assignedPosition;
-      if (isPositionNeeded(team, player.userId.position)) {
-        assignedPosition = player.userId.position;
-      } else if (isPositionNeeded(team, player.userId.secondaryPosition)) {
-        assignedPosition = player.userId.secondaryPosition;
-      } else {
-        assignedPosition = positions.find(pos => isPositionNeeded(team, pos)) || player.userId.position;
-      }
-  
-      team.push({
-        userId: player.userId._id.toString(),
+    console.log('Players before team assignment:');
+    players.forEach((player, index) => {
+      console.log(`Player ${index}:`, {
+        id: player.userId._id,
         name: player.userId.name,
         position: player.userId.position,
         secondaryPosition: player.userId.secondaryPosition,
-        assignedPosition: assignedPosition,
-        profilePicture: player.userId.profilePicturePath ? `/uploads/${player.userId.profilePicturePath}` : null,
-        mmr: player.userId[mmrField] || 1000,
-        team: i % 2 === 0 ? 'blue' : 'red'
+        mmr5v5: player.userId.mmr5v5,
+        mmr11v11: player.userId.mmr11v11
       });
+    });
+    // Define position requirements
+    const positionRequirements = gameMode === '5v5' 
+      ? { goalkeeper: 1, outfield: 4 }
+      : { 
+          goalkeeper: 1, 
+          fullback: 2, 
+          centerback: { min: 1, max: 2 }, 
+          winger: 2, 
+          midfielder: { min: 2, max: 3 }, 
+          striker: { min: 1, max: 2 }
+        };
+  
+    // Check if we have enough players for each required position
+    const canPlayPosition = (player, position) => {
+      return player.userId.position === position || player.userId.secondaryPosition === position;
+    };
+  
+    const availablePositions = players.reduce((acc, player) => {
+      if (gameMode === '5v5') {
+        if (canPlayPosition(player, 'goalkeeper')) {
+          acc['goalkeeper'] = (acc['goalkeeper'] || 0) + 1;
+        }
+        acc['outfield'] = (acc['outfield'] || 0) + 1;
+      } else {
+        Object.keys(positionRequirements).forEach(position => {
+          if (canPlayPosition(player, position)) {
+            acc[position] = (acc[position] || 0) + 1;
+          }
+        });
+      }
+      return acc;
+    }, {});
+  
+    for (const [position, required] of Object.entries(positionRequirements)) {
+      const minRequired = typeof required === 'object' ? required.min : required;
+      if ((availablePositions[position] || 0) < minRequired) {
+        console.log(`Not enough players for position ${position}. Required: ${minRequired}, Available: ${availablePositions[position] || 0}`);
+        return null;
+      }
+    }
+  
+    const team1 = [];
+    const team2 = [];
+    const assignedPlayers = new Set();
+    // Helper function to check if a position is needed
+    const isPositionNeeded = (team, position) => {
+      const count = team.filter(p => p.assignedPosition === position).length;
+      const requirement = positionRequirements[position];
+      if (typeof requirement === 'object') {
+        return count < requirement.max;
+      }
+      return count < requirement;
+    };
+  
+    // Function to assign players to teams
+    const assignPlayers = () => {
+      const fillPosition = (position, team) => {
+        let player = players.find(p => 
+          !assignedPlayers.has(p) && 
+          (p.userId.position === position || p.userId.secondaryPosition === position)
+        );
+    
+        if (player) {
+          team.push({ ...player, assignedPosition: position });
+          assignedPlayers.add(player);
+          return true;
+        }
+        return false;
+      };
+    
+      for (const position in positionRequirements) {
+        const requiredCount = typeof positionRequirements[position] === 'object' 
+          ? positionRequirements[position].min 
+          : positionRequirements[position];
+        
+        for (let i = 0; i < requiredCount; i++) {
+          if (!fillPosition(position, team1) || !fillPosition(position, team2)) {
+            return false; // Failed to fill all positions
+          }
+        }
+      }
+    
+      return true; // Successfully filled all positions
+    };
+    
+    let matchCreated = false;
+    let attempts = 0;
+    const maxAttempts = 10; // Adjust this value as needed
+    
+    while (!matchCreated && attempts < maxAttempts) {
+      matchCreated = assignPlayers();
+      if (!matchCreated) {
+        console.log(`Attempt ${attempts + 1} failed to create a match. Adding more players and trying again...`);
+        await addDummyPlayers(); // Add more dummy players
+        attempts++;
+      }
+    }
+    
+    if (!matchCreated) {
+      console.log('Failed to create a match after multiple attempts');
+      return null;
     }
   
     // Check total MMR difference
-    const team1MMR = team1.reduce((sum, p) => sum + p.mmr, 0);
-    const team2MMR = team2.reduce((sum, p) => sum + p.mmr, 0);
+    const calculateTeamMMR = (team) => {
+      console.log('Calculating team MMR for:', team);
+      return team.reduce((sum, p, index) => {
+        console.log(`Processing player ${index}:`, p);
+        if (!p || !p.userId) {
+          console.error(`Invalid player object at index ${index}:`, p);
+          return sum;
+        }
+        const playerMMR = p.userId[mmrField] || 1000;
+        console.log(`Player ${index} MMR:`, playerMMR);
+        return sum + playerMMR;
+      }, 0);
+    };
+    
+    console.log('Team 1 (full objects):', JSON.stringify(team1, null, 2));
+    console.log('Team 2 (full objects):', JSON.stringify(team2, null, 2));
+    
+    const team1MMR = calculateTeamMMR(team1);
+    const team2MMR = calculateTeamMMR(team2);
+    
+    console.log('Team 1 MMR:', team1MMR);
+    console.log('Team 2 MMR:', team2MMR);
+    
     if (Math.abs(team1MMR - team2MMR) > maxTotalMMRDifference) {
       console.log('Total MMR difference too high, aborting match creation');
       return null;
     }
   
-    // Remove matched players from the queue
-    await Queue.deleteMany({ userId: { $in: players.map(p => p.userId._id) } });
+    // Format teams for return
+    const formatTeam = (team) => team.map(player => {
+      if (!player.userId) {
+        console.error('Invalid player data:', player);
+        return null; // Skip this player if data is invalid
+      }
+      return {
+        userId: player.userId._id.toString(),
+        name: player.userId.name,
+        position: player.userId.position,
+        secondaryPosition: player.userId.secondaryPosition,
+        assignedPosition: player.assignedPosition,
+        profilePicture: player.userId.profilePicturePath ? `/uploads/${player.userId.profilePicturePath}` : null,
+        mmr: player.userId[mmrField] || 1000,
+        team: team === team1 ? 'blue' : 'red'
+      };
+    }).filter(Boolean); // Remove any null entries
   
-    // Create a new game with a new unique ID
+    // Remove matched players from the queue
+    const realPlayerIds = [...team1, ...team2]
+      .filter(p => !p.userId.email.startsWith('dummy'))
+      .map(p => p.userId._id);
+    await Queue.deleteMany({ userId: { $in: realPlayerIds } });
+  
+    // Create a new game
     const newGame = new Game({
-      players: players.map(p => p.userId._id),
+      players: [...team1, ...team2].map(p => p.userId._id),
       gameMode,
       status: 'lobby',
       startTime: new Date()
@@ -926,8 +1038,8 @@ async function startServer() {
   
     return { 
       id: newGame._id.toString(),
-      team1, 
-      team2 
+      team1: formatTeam(team1), 
+      team2: formatTeam(team2)
     };
   }
 
@@ -1284,6 +1396,7 @@ async function startServer() {
       const email = `dummy${i + 1}@example.com`;
       const sex = i % 2 === 0 ? 'male' : 'female';
       const position = positions[i % positions.length];
+      const secondaryPosition = positions[Math.floor(i / 20)];
       const skillLevel = skillLevels[Math.floor(i / 20)];
       const dateOfBirth = new Date(1990, 0, 1);
 
@@ -1298,6 +1411,7 @@ async function startServer() {
           phone: `123456789${i}`,
           sex,
           position,
+          secondaryPosition,
           skillLevel,
           mmr5v5: mmr,
           mmr11v11: mmr,
@@ -1347,5 +1461,7 @@ async function startServer() {
 
   setInterval(checkAndResetBanStage, 24 * 60 * 60 * 1000); // Run once a day
 }
+
+startServer().catch(error => console.error('Failed to start server:', error));
 
 startServer().catch(error => console.error('Failed to start server:', error));
