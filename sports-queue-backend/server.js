@@ -28,6 +28,7 @@ app.use(cors({
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 async function startServer() {
+  
   const mongod = await MongoMemoryServer.create();
   const uri = mongod.getUri();
   
@@ -147,6 +148,7 @@ async function startServer() {
       console.log(`User ${reportedUserId} ban stage progressed due to ${reportsCount} reports in game ${gameId}`);
     }
   }
+  
   async function createAdminUser() {
     const adminEmail = process.env.ADMIN_EMAIL || 'Reuven5771@gmail.com';
     const adminPassword = process.env.ADMIN_PASSWORD || 'Remember4';
@@ -734,188 +736,149 @@ async function startServer() {
       res.status(500).json({ error: 'Failed to check penalty status' });
     }
   });
-
-  const MATCH_CHECK_INTERVAL = 5000; // Check for potential matches every 10 seconds
-const MAX_MMR_DIFFERENCE = 800;
-const PREFERRED_MMR_RANGE = 200;
-
-async function startMatchmakingProcess() {
-  console.log('Starting continuous matchmaking process');
-  while (true) {
-    try {
-      await checkForMatches('5v5');
-      await checkForMatches('11v11');
-    } catch (error) {
-      console.error('Error in matchmaking process:', error);
-    }
-    await new Promise(resolve => setTimeout(resolve, MATCH_CHECK_INTERVAL));
-  }
-}
-
-async function checkForMatches(gameMode) {
-  const modeField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
-  const playerCount = gameMode === '5v5' ? 10 : 22;
-  const requiredPositions = gameMode === '5v5' ? POSITIONS_5V5 : POSITIONS_11V11;
-
-  let matchCreated;
-  do {
-    matchCreated = await tryCreateMatch(gameMode, modeField, playerCount, requiredPositions);
-    if (matchCreated) {
-      console.log(`Match created for ${gameMode}:`, matchCreated);
-      // Here you would typically notify the matched players
-      // This could be done through WebSockets, or by updating a 'matchFound' field in their user documents
-    }
-  } while (matchCreated);
-}
-
-async function findMatchForPlayer(user, gameMode) {
-  const modeField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
-  const playerCount = gameMode === '5v5' ? 10 : 22;
-  const requiredPositions = gameMode === '5v5' ? POSITIONS_5V5 : POSITIONS_11V11;
-
-  // Add the player to the queue
-  await Queue.create({ userId: user._id, gameMode, joinedAt: new Date() });
-
-  // Try to create a match immediately
-  const match = await tryCreateMatch(gameMode, modeField, playerCount, requiredPositions);
-  if (match) {
-    return match;
-  }
-
-  // If no match is found immediately, return null
-  // The client can implement polling or use WebSockets to check for updates
-  return null;
-}
-
-async function tryCreateMatch(gameMode, modeField, playerCount, requiredPositions) {
-  // Get all players in queue for this game mode
-  let queuedPlayers = await Queue.find({ gameMode }).populate('userId').sort('joinedAt');
-  console.log(`Found ${queuedPlayers.length} players in queue for ${gameMode}`);
-
-  if (queuedPlayers.length < playerCount) {
-    return null; // Not enough players to create a match
-  }
-
-  const match = createBalancedMatch(queuedPlayers, modeField, requiredPositions);
-
-  if (!match) {
-    return null; // Couldn't create a balanced match
-  }
-
-  // Create a new game
-  const newGame = new Game({
-    players: match.map(p => p.userId._id),
-    gameMode,
-    status: 'lobby',
-    startTime: new Date()
-  });
-
-  await newGame.save();
-
-  // Remove matched players from queue
-  const matchedPlayerIds = match.map(p => p.userId._id);
-  await Queue.deleteMany({ userId: { $in: matchedPlayerIds } });
-
-  const team1 = match.slice(0, playerCount / 2);
-  const team2 = match.slice(playerCount / 2);
-
-  return {
-    gameId: newGame._id,
-    team1: team1.map(p => ({ 
-      id: p.userId._id, 
-      name: p.userId.name, 
-      mmr: p.userId[modeField],
-      position: p.position
-    })),
-    team2: team2.map(p => ({ 
-      id: p.userId._id, 
-      name: p.userId.name, 
-      mmr: p.userId[modeField],
-      position: p.position
-    }))
-  };
-}
-
-function createBalancedMatch(players, modeField, requiredPositions) {
-  const match = [];
-
-  for (let team = 0; team < 2; team++) {
-    for (const position of requiredPositions) {
-      let chosenPlayer = findSuitablePlayer(players, match, position, modeField);
-      
-      if (!chosenPlayer) {
-        return null; // Can't form a balanced team
-      }
-
-      chosenPlayer.position = position;
-      match.push(chosenPlayer);
-    }
-  }
-
-  return isMatchBalanced(match, modeField) ? match : null;
-}
-
-function findSuitablePlayer(players, currentMatch, position, modeField) {
-  let bestPlayer = null;
-  let bestScore = -Infinity;
-
-  const averageMMR = currentMatch.length > 0 
-    ? currentMatch.reduce((sum, p) => sum + p.userId[modeField], 0) / currentMatch.length
-    : players[0].userId[modeField];
-
-  for (const player of players) {
-    if (currentMatch.some(p => p.userId._id.equals(player.userId._id))) continue;
-
-    const mmrDifference = Math.abs(player.userId[modeField] - averageMMR);
-    let positionScore = 0;
-
-    if (player.userId.position === position) {
-      positionScore = 2; // Highest priority for primary position
-    } else if (player.userId.secondaryPosition === position) {
-      positionScore = 1; // Lower priority for secondary position
-    } else {
-      continue; // Skip this player if neither position matches
-    }
-
-    let mmrScore = 0;
-    if (mmrDifference <= PREFERRED_MMR_RANGE) {
-      mmrScore = 2; // Highest priority for preferred MMR range
-    } else if (mmrDifference <= MAX_MMR_DIFFERENCE) {
-      mmrScore = 1; // Lower priority for acceptable MMR range
-    } else {
-      continue; // Skip this player if MMR difference is too high
-    }
-
-    const score = positionScore + mmrScore;
-
-    if (score > bestScore) {
-      bestScore = score;
-      bestPlayer = player;
-    }
-  }
-
-  return bestPlayer;
-}
-
-function isMatchBalanced(match, modeField) {
-  const midpoint = match.length / 2;
-  const team1MMR = match.slice(0, midpoint).reduce((sum, p) => sum + p.userId[modeField], 0);
-  const team2MMR = match.slice(midpoint).reduce((sum, p) => sum + p.userId[modeField], 0);
-  const mmrDifference = Math.abs(team1MMR - team2MMR);
-
-  return mmrDifference <= MAX_MMR_DIFFERENCE;
-}
-
-const POSITIONS_5V5 = ['goalkeeper', 'field player', 'field player', 'field player', 'field player'];
-const POSITIONS_11V11 = [
-  'goalkeeper',
-  'fullback', 'fullback',
-  'centerback', 'centerback',
-  'winger', 'winger',
-  'midfielder', 'midfielder', 'midfielder',
-  'striker'
-];
+  const POSITIONS_5V5 = ['goalkeeper', 'defender', 'midfielder', 'forward'];
+  const POSITIONS_11V11 = ['goalkeeper', 'fullback', 'centerback', 'winger', 'midfielder', 'striker'];
   
+  async function startMatchmakingProcess() {
+    setInterval(async () => {
+      await findMatches('5v5');
+      await findMatches('11v11');
+    }, 10000); // Run every 10 seconds
+  }
+  
+  async function findMatches(gameMode) {
+    const queuedPlayers = await Queue.find({ gameMode }).populate('userId');
+    
+    if (queuedPlayers.length < (gameMode === '5v5' ? 10 : 22)) {
+      return; // Not enough players to form a match
+    }
+  
+    const match = await tryCreateMatch(gameMode, gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11', gameMode === '5v5' ? 10 : 22, gameMode === '5v5' ? POSITIONS_5V5 : POSITIONS_11V11);
+  
+    if (match) {
+      console.log(`Match found for ${gameMode}:`, match);
+      await createGame(match, gameMode);
+    }
+  }
+  
+  async function tryCreateMatch(gameMode, mmrField, teamSize, positions) {
+    const queuedPlayers = await Queue.find({ gameMode }).populate('userId');
+    const sortedPlayers = queuedPlayers.sort((a, b) => a.userId[mmrField] - b.userId[mmrField]);
+  
+    for (let i = 0; i < sortedPlayers.length - teamSize + 1; i++) {
+      const potentialMatch = sortedPlayers.slice(i, i + teamSize);
+      const team1 = potentialMatch.slice(0, teamSize / 2);
+      const team2 = potentialMatch.slice(teamSize / 2);
+  
+      if (isValidMatch(team1, team2, mmrField, positions)) {
+        return { team1, team2 };
+      }
+    }
+  
+    return null;
+  }
+  
+  function isValidMatch(team1, team2, mmrField, positions) {
+    const team1MMR = team1.reduce((sum, player) => sum + player.userId[mmrField], 0);
+    const team2MMR = team2.reduce((sum, player) => sum + player.userId[mmrField], 0);
+  
+    if (Math.abs(team1MMR - team2MMR) > 800) {
+      return false;
+    }
+  
+    return hasValidPositions(team1, positions) && hasValidPositions(team2, positions);
+  }
+  
+  function hasValidPositions(team, positions) {
+    const positionCounts = {};
+    positions.forEach(pos => positionCounts[pos] = 0);
+  
+    team.forEach(player => {
+      const primaryPos = player.userId.position;
+      const secondaryPos = player.userId.secondaryPosition;
+  
+      if (positionCounts[primaryPos] < getRequiredCount(primaryPos, positions)) {
+        positionCounts[primaryPos]++;
+      } else if (positionCounts[secondaryPos] < getRequiredCount(secondaryPos, positions)) {
+        positionCounts[secondaryPos]++;
+      } else {
+        // Assign to any available position
+        for (const pos of positions) {
+          if (positionCounts[pos] < getRequiredCount(pos, positions)) {
+            positionCounts[pos]++;
+            break;
+          }
+        }
+      }
+    });
+  
+    return positions.every(pos => positionCounts[pos] >= getRequiredCount(pos, positions));
+  }
+  
+  function getRequiredCount(position, positions) {
+    if (positions.length === 4) { // 5v5
+      return position === 'goalkeeper' ? 1 : 0; // 1 goalkeeper, others flexible
+    } else { // 11v11
+      switch (position) {
+        case 'goalkeeper': return 1;
+        case 'fullback': return 2;
+        case 'centerback': return 1;
+        case 'winger': return 2;
+        case 'midfielder': return 2;
+        case 'striker': return 1;
+        default: return 0;
+      }
+    }
+  }
+  
+  async function createGame(match, gameMode) {
+    const allPlayers = [...match.team1, ...match.team2];
+    const playerIds = allPlayers.map(player => player.userId._id);
+  
+    const game = new Game({
+      players: playerIds,
+      gameMode: gameMode,
+      status: 'lobby',
+      startTime: new Date()
+    });
+  
+    await game.save();
+  
+    // Remove players from queue
+    await Queue.deleteMany({ userId: { $in: playerIds } });
+  
+    // Notify players (implement this based on your notification system)
+    allPlayers.forEach(player => notifyPlayer(player.userId._id, game._id));
+  }
+  
+  function notifyPlayer(playerId, gameId) {
+    // Implement your notification logic here
+    console.log(`Notifying player ${playerId} about game ${gameId}`);
+  }
+  
+  // Helper function to find a match for a single player
+  async function findMatchForPlayer(player, gameMode) {
+    const mmrField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
+    const teamSize = gameMode === '5v5' ? 10 : 22;
+    const positions = gameMode === '5v5' ? POSITIONS_5V5 : POSITIONS_11V11;
+  
+    // Check if player is already in queue
+    const existingQueue = await Queue.findOne({ userId: player._id, gameMode });
+    if (existingQueue) {
+      console.log(`Player ${player.name} is already in ${gameMode} queue`);
+      return;
+    }
+  
+    // Add player to queue
+    await Queue.create({ userId: player._id, gameMode });
+  
+    // Try to find a match
+    const match = await tryCreateMatch(gameMode, mmrField, teamSize, positions);
+    if (match) {
+      await createGame(match, gameMode);
+    }
+  }
+
 app.post('/api/queue/join', authMiddleware, async (req, res) => {
   try {
     const { gameMode } = req.body;
@@ -1409,9 +1372,11 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
 
   setInterval(checkAndResetBanStage, 24 * 60 * 60 * 1000); // Run once a day
 
-  startMatchmakingProcess().catch(error => {
-    console.error('Error starting matchmaking process:', error);
-  });
+  return { startMatchmakingProcess, findMatchForPlayer };
 }
 
-startServer().catch(error => console.error('Failed to start server:', error));
+startServer()
+  .then(({ startMatchmakingProcess, findMatchForPlayer }) => {
+    // You can now use startMatchmakingProcess and findMatchForPlayer here if needed
+  })
+  .catch(error => console.error('Failed to start server:', error));

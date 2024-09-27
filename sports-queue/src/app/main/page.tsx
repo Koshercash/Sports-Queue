@@ -218,18 +218,15 @@ export default function MainScreen() {
     console.log('Toggle Queue called. Current state:', { queueStatus, isGameInProgress, gameState });
     
     // Clear existing game state
-    setInGame(false);
-    setIsGameInProgress(false);
-    setMatch(null);
-    localStorage.removeItem('gameState');
-
+    clearGameState(); // Use clearGameState function to reset state
+    
     await checkPenaltyStatus();
-
+    
     if (isPenalized) {
       alert(`You are currently penalized and cannot join games until ${penaltyEndTime?.toLocaleString()}`);
       return;
     }
-
+    
     if (queueStatus === 'idle') {
       try {
         const token = localStorage.getItem('token');
