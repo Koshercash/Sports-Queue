@@ -32,9 +32,9 @@ async function startServer() {
   const uri = mongod.getUri();
   
   await mongoose.connect(uri, { useNewUrlParser: true, useUnifiedTopology: true });
-
   console.log('Connected to in-memory MongoDB');
 
+  // Define all schemas and models first
   const UserSchema = new mongoose.Schema({
     isAdmin: { type: Boolean, default: false },
     name: String,
@@ -54,17 +54,12 @@ async function startServer() {
     cityTown: String, // Add this line
   });
 
-  const User = mongoose.model('User', UserSchema);
-
   const FriendSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     friend: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     status: { type: String, enum: ['pending', 'accepted', 'rejected'] }
   });
 
-
-  const Friend = mongoose.model('Friend', FriendSchema)
-  
   const GameSchema = new mongoose.Schema({
     players: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     gameMode: String,
@@ -72,16 +67,12 @@ async function startServer() {
     startTime: Date,
     endTime: Date
   });
-  
-  const Game = mongoose.model('Game', GameSchema);
 
   const QueueSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     gameMode: String,
     timestamp: { type: Date, default: Date.now }
   });
-
-  const Queue = mongoose.model('Queue', QueueSchema);
 
   const PenaltySchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -97,8 +88,6 @@ async function startServer() {
     reason: String,
     timestamp: { type: Date, default: Date.now }
   });
-  
-  const Report = mongoose.model('Report', ReportSchema);
 
   const BanSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -106,19 +95,26 @@ async function startServer() {
     expiresAt: Date,
     lastProgressedAt: Date
   });
- 
+
   const BanAppealSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     reason: String,
     status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     createdAt: { type: Date, default: Date.now }
   });
-  
+
+  // Create models
+  const User = mongoose.model('User', UserSchema);
+  const Friend = mongoose.model('Friend', FriendSchema);
+  const Game = mongoose.model('Game', GameSchema);
+  const Queue = mongoose.model('Queue', QueueSchema);
+  const Penalty = mongoose.model('Penalty', PenaltySchema);
+  const Report = mongoose.model('Report', ReportSchema);
+  const Ban = mongoose.model('Ban', BanSchema);
   const BanAppeal = mongoose.model('BanAppeal', BanAppealSchema);
 
-  const Ban = mongoose.model('Ban', BanSchema);
-
-  const Penalty = mongoose.model('Penalty', PenaltySchema);
+  // Create indexes after models are defined
+  await Queue.collection.createIndex({ gameMode: 1, 'userId.position': 1, 'userId.secondaryPosition': 1, 'userId.mmr5v5': 1, 'userId.mmr11v11': 1, joinedAt: 1 });
 
   async function handleReport(reportedUserId, reportingUserId, gameId, reason) {
     // Validate reportedUserId and gameId
@@ -147,6 +143,7 @@ async function startServer() {
       console.log(`User ${reportedUserId} ban stage progressed due to ${reportsCount} reports in game ${gameId}`);
     }
   }
+
   async function createAdminUser() {
     const adminEmail = process.env.ADMIN_EMAIL || 'Reuven5771@gmail.com';
     const adminPassword = process.env.ADMIN_PASSWORD || 'Remember4';
@@ -743,6 +740,7 @@ async function startMatchmakingProcess() {
   console.log('Starting continuous matchmaking process');
   while (true) {
     try {
+      await logQueueState();
       await checkForMatches('5v5');
       await checkForMatches('11v11');
     } catch (error) {
@@ -753,20 +751,43 @@ async function startMatchmakingProcess() {
 }
 
 async function checkForMatches(gameMode) {
+  console.log(`Checking for ${gameMode} matches`);
   const modeField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
   const playerCount = gameMode === '5v5' ? 10 : 22;
   const requiredPositions = gameMode === '5v5' ? POSITIONS_5V5 : POSITIONS_11V11;
 
-  let matchCreated;
-  do {
-    matchCreated = await tryCreateMatch(gameMode, modeField, playerCount, requiredPositions);
-    if (matchCreated) {
-      console.log(`Match created for ${gameMode}:`, matchCreated);
-      // Here you would typically notify the matched players
-      // This could be done through WebSockets, or by updating a 'matchFound' field in their user documents
-    }
-  } while (matchCreated);
+  const queueSize = await Queue.countDocuments({ gameMode });
+  console.log(`Current queue size for ${gameMode}: ${queueSize}`);
+
+  if (queueSize < playerCount) {
+    console.log(`Not enough players in ${gameMode} queue to create a match`);
+    return;
+  }
+
+  const matchCreated = await tryCreateMatch(gameMode, modeField, playerCount, requiredPositions);
+  if (matchCreated) {
+    console.log(`Match created for ${gameMode}:`, matchCreated);
+    // Here you would typically notify the matched players
+  } else {
+    console.log(`Failed to create ${gameMode} match`);
+  }
 }
+
+// Ensure this function is called regularly
+async function startMatchmakingProcess() {
+  console.log('Starting continuous matchmaking process');
+  while (true) {
+    try {
+      await logQueueState();
+      await checkForMatches('5v5');
+      await checkForMatches('11v11');
+    } catch (error) {
+      console.error('Error in matchmaking process:', error);
+    }
+    await new Promise(resolve => setTimeout(resolve, 5000)); // Check every 5 seconds
+  }
+}
+
 
 async function findMatchForPlayer(user, gameMode) {
   const modeField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
@@ -788,53 +809,145 @@ async function findMatchForPlayer(user, gameMode) {
 }
 
 async function tryCreateMatch(gameMode, modeField, playerCount, requiredPositions) {
-  // Get all players in queue for this game mode
-  let queuedPlayers = await Queue.find({ gameMode }).populate('userId').sort('joinedAt');
-  console.log(`Found ${queuedPlayers.length} players in queue for ${gameMode}`);
+  console.log(`Attempting to create match for ${gameMode}`);
+  const match = [];
+  const initialMMRRange = 200;
+  const maxMMRDifference = 800;
+  const mmrIncrement = 100;
 
-  if (queuedPlayers.length < playerCount) {
-    return null; // Not enough players to create a match
+  // Fetch all queued players once
+  const queuedPlayers = await Queue.find({ gameMode }).populate('userId');
+  console.log(`Found ${queuedPlayers.length} total players in queue for ${gameMode}`);
+
+  for (const position of requiredPositions) {
+    let player = null;
+    let currentMMRRange = initialMMRRange;
+
+    while (!player && currentMMRRange <= maxMMRDifference) {
+      const averageMMR = match.length > 0
+        ? match.reduce((sum, p) => sum + p.userId[modeField], 0) / match.length
+        : 1000; // Default to 1000 if no players matched yet
+
+      console.log(`Searching for ${position} with MMR range: ${averageMMR - currentMMRRange} to ${averageMMR + currentMMRRange}`);
+
+      // Filter players based on position and MMR range
+      const suitablePlayers = queuedPlayers.filter(qp => 
+        qp.userId &&
+        (position === 'goalkeeper' 
+          ? (qp.userId.position === 'goalkeeper' || qp.userId.secondaryPosition === 'goalkeeper')
+          : (qp.userId.position !== 'goalkeeper' || qp.userId.secondaryPosition !== 'goalkeeper')) &&
+        qp.userId[modeField] >= averageMMR - currentMMRRange && 
+        qp.userId[modeField] <= averageMMR + currentMMRRange &&
+        !match.some(m => m.userId._id.equals(qp.userId._id))
+      );
+
+      console.log(`${suitablePlayers.length} suitable players found for ${position}`);
+
+      if (suitablePlayers.length > 0) {
+        // Prioritize players with the position as their primary or secondary position
+        const priorityPlayers = suitablePlayers.filter(p => 
+          p.userId.position === position || p.userId.secondaryPosition === position
+        );
+        player = priorityPlayers.length > 0 
+          ? priorityPlayers[Math.floor(Math.random() * priorityPlayers.length)].userId
+          : suitablePlayers[Math.floor(Math.random() * suitablePlayers.length)].userId;
+
+        console.log(`Selected player: ${player.name} (Primary: ${player.position}, Secondary: ${player.secondaryPosition}, MMR: ${player[modeField]}) for position ${position}`);
+        await Queue.deleteOne({ userId: player._id, gameMode });
+        match.push({ userId: player, position });
+      } else {
+        console.log(`No suitable player found for ${position}, increasing MMR range`);
+        currentMMRRange += mmrIncrement;
+      }
+    }
+
+    if (!player) {
+      console.log(`Couldn't find a suitable player for position: ${position}`);
+      // Return players to queue and abort match creation
+      for (const matchedPlayer of match) {
+        await Queue.create({ userId: matchedPlayer.userId._id, gameMode, joinedAt: new Date() });
+      }
+      return null;
+    }
   }
 
-  const match = createBalancedMatch(queuedPlayers, modeField, requiredPositions);
-
-  if (!match) {
-    return null; // Couldn't create a balanced match
+  if (match.length !== playerCount) {
+    console.log(`Not enough players found. Required: ${playerCount}, Found: ${match.length}`);
+    return null;
   }
 
-  // Create a new game
-  const newGame = new Game({
-    players: match.map(p => p.userId._id),
-    gameMode,
-    status: 'lobby',
-    startTime: new Date()
-  });
+  console.log(`Successfully created match with ${match.length} players`);
 
-  await newGame.save();
+  try {
+    // Create a new game
+    const newGame = new Game({
+      players: match.map(p => p.userId._id),
+      gameMode,
+      status: 'lobby',
+      startTime: new Date()
+    });
 
-  // Remove matched players from queue
-  const matchedPlayerIds = match.map(p => p.userId._id);
-  await Queue.deleteMany({ userId: { $in: matchedPlayerIds } });
+    await newGame.save();
 
-  const team1 = match.slice(0, playerCount / 2);
-  const team2 = match.slice(playerCount / 2);
+    const team1 = match.slice(0, playerCount / 2);
+    const team2 = match.slice(playerCount / 2);
 
-  return {
-    gameId: newGame._id,
-    team1: team1.map(p => ({ 
-      id: p.userId._id, 
-      name: p.userId.name, 
-      mmr: p.userId[modeField],
-      position: p.position
-    })),
-    team2: team2.map(p => ({ 
-      id: p.userId._id, 
-      name: p.userId.name, 
-      mmr: p.userId[modeField],
-      position: p.position
-    }))
-  };
+    return {
+      gameId: newGame._id,
+      team1: team1.map(p => ({ 
+        id: p.userId._id, 
+        name: p.userId.name || 'Unknown',
+        mmr: p.userId[modeField],
+        position: p.position
+      })),
+      team2: team2.map(p => ({ 
+        id: p.userId._id, 
+        name: p.userId.name || 'Unknown',
+        mmr: p.userId[modeField],
+        position: p.position
+      }))
+    };
+  } catch (error) {
+    console.error('Error creating game:', error);
+    return null;
+  }
 }
+
+// Update the POSITIONS constants
+const POSITIONS_5V5 = ['goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper'];
+const POSITIONS_11V11 = [
+  'goalkeeper',
+  'fullback', 'fullback',
+  'centerback', 'centerback',
+  'winger', 'winger',
+  'midfielder', 'midfielder', 'midfielder',
+  'striker'
+];
+
+// Update the checkForMatches function
+async function checkForMatches(gameMode) {
+  console.log(`Checking for ${gameMode} matches`);
+  const modeField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
+  const playerCount = gameMode === '5v5' ? 10 : 22;
+  const requiredPositions = gameMode === '5v5' ? POSITIONS_5V5.concat(POSITIONS_5V5) : POSITIONS_11V11.concat(POSITIONS_11V11);
+
+  const queueSize = await Queue.countDocuments({ gameMode });
+  console.log(`Current queue size for ${gameMode}: ${queueSize}`);
+
+  if (queueSize < playerCount) {
+    console.log(`Not enough players in ${gameMode} queue to create a match`);
+    return;
+  }
+
+  const matchCreated = await tryCreateMatch(gameMode, modeField, playerCount, requiredPositions);
+  if (matchCreated) {
+    console.log(`Match created for ${gameMode}:`, matchCreated);
+    // Here you would typically notify the matched players
+  } else {
+    console.log(`Failed to create ${gameMode} match`);
+  }
+}
+
 
 function createBalancedMatch(players, modeField, requiredPositions) {
   const match = [];
@@ -873,8 +986,10 @@ function findSuitablePlayer(players, currentMatch, position, modeField) {
       positionScore = 2; // Highest priority for primary position
     } else if (player.userId.secondaryPosition === position) {
       positionScore = 1; // Lower priority for secondary position
+    } else if (position === 'non-goalkeeper' && player.userId.position !== 'goalkeeper') {
+      positionScore = 1; // Allow any non-goalkeeper position for 'non-goalkeeper'
     } else {
-      continue; // Skip this player if neither position matches
+      continue; // Skip this player if position doesn't match
     }
 
     let mmrScore = 0;
@@ -906,16 +1021,7 @@ function isMatchBalanced(match, modeField) {
   return mmrDifference <= MAX_MMR_DIFFERENCE;
 }
 
-const POSITIONS_5V5 = ['goalkeeper', 'field player', 'field player', 'field player', 'field player'];
-const POSITIONS_11V11 = [
-  'goalkeeper',
-  'fullback', 'fullback',
-  'centerback', 'centerback',
-  'winger', 'winger',
-  'midfielder', 'midfielder', 'midfielder',
-  'striker'
-];
-  
+
 app.post('/api/queue/join', authMiddleware, async (req, res) => {
   try {
     const { gameMode } = req.body;
@@ -1329,8 +1435,8 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
       const email = `dummy${i + 1}@example.com`;
       const sex = i % 2 === 0 ? 'male' : 'female';
       const position = positions[i % positions.length];
-      const secondaryPosition = positions[Math.floor(i / 20)];
-      const skillLevel = skillLevels[Math.floor(i / 20)];
+      const secondaryPosition = positions[(i + 1) % positions.length]; // Ensure different secondary position
+      const skillLevel = skillLevels[Math.floor(i / 22)]; // Distribute skill levels more evenly
       const dateOfBirth = new Date(1990, 0, 1);
 
       const existingUser = await User.findOne({ email });
@@ -1363,12 +1469,26 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
   
       for (const player of dummyPlayers) {
         const randomGameMode = gameModes[Math.floor(Math.random() * gameModes.length)];
-        await findMatchForPlayer(player, randomGameMode);
+        await Queue.create({ 
+          userId: player._id, 
+          gameMode: randomGameMode, 
+          joinedAt: new Date() 
+        });
         console.log(`Added dummy player ${player.name} to ${randomGameMode} queue`);
       }
     } catch (error) {
       console.error('Error adding dummy players to queue:', error);
     }
+  }
+  async function logQueueState() {
+    const queue5v5 = await Queue.find({ gameMode: '5v5' }).populate('userId');
+    const queue11v11 = await Queue.find({ gameMode: '11v11' }).populate('userId');
+  
+    console.log('Current 5v5 queue:');
+    queue5v5.forEach(q => console.log(`${q.userId.name} (${q.userId.position}/${q.userId.secondaryPosition})`));
+  
+    console.log('Current 11v11 queue:');
+    queue11v11.forEach(q => console.log(`${q.userId.name} (${q.userId.position}/${q.userId.secondaryPosition})`));
   }
   // Call these functions after connecting to the database
   await createSampleUsers();
