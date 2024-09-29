@@ -128,31 +128,21 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     }
   };
 
-  const handlePlayerClick = async (player: MatchPlayer) => {
+  const handlePlayerClick = async (playerId: string) => {
+    console.log('Clicked player ID:', playerId);
+    if (!playerId) {
+      console.error('Invalid player ID');
+      return;
+    }
     try {
       const token = localStorage.getItem('token');
-      console.log('Token:', token ? 'exists' : 'not found');
-      console.log('Fetching profile for player:', player.userId);
-      const response = await axios.get<UserProfileData>(`${API_BASE_URL}/api/user/${player.userId}`, {
+      const response = await axios.get<UserProfileData>(`${API_BASE_URL}/api/user/${playerId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       console.log('Profile data received:', response.data);
-      const profileData = {
-        ...response.data,
-        profilePicture: response.data.profilePicture
-          ? response.data.profilePicture.startsWith('http')
-            ? response.data.profilePicture
-            : `${API_BASE_URL}${response.data.profilePicture}`
-          : null,
-        cityTown: response.data.cityTown || ''
-      };
-      setSelectedProfile(profileData);
+      setSelectedProfile(response.data);
     } catch (error) {
       console.error('Failed to fetch user profile:', error);
-      if (axios.isAxiosError(error)) {
-        console.error('Error response:', error.response?.data);
-        console.error('Error status:', error.response?.status);
-      }
       alert('Failed to load user profile. Please try again.');
     }
   };
@@ -369,22 +359,26 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       let foundPlayer = allPlayers.find(p => p.userId === (user.id || user.userId));
       
       if (foundPlayer) {
+        // Use the team and position from the match data
         foundPlayer = {
           ...foundPlayer,
-          position: foundPlayer.assignedPosition === 'primary' ? (user.position || 'Not specified') : (user.secondaryPosition || 'Not specified'),
+          team: foundPlayer.team, // Use the team from match data
+          position: foundPlayer.position === 'non-goalkeeper' && gameMode === '5v5' 
+            ? user.position 
+            : foundPlayer.position,
           secondaryPosition: user.secondaryPosition || 'Not specified'
         };
       } else {
-        console.log('User not found in match. Assigning random position.');
-        const randomTeam = Math.random() < 0.5 ? 'blue' : 'red';
-        const assignedPosition = Math.random() < 0.5 ? 'primary' : 'secondary';
+        console.log('User not found in match. This should not happen.');
+        // If this happens, it's an error condition and should be handled appropriately
+        // For now, we'll assign a default, but this should be investigated
         foundPlayer = {
           userId: user.id || user.userId,
           name: user.name,
-          position: assignedPosition === 'primary' ? (user.position || 'Not specified') : (user.secondaryPosition || 'Not specified'),
+          position: user.position || 'Not specified',
           secondaryPosition: user.secondaryPosition || 'Not specified',
-          assignedPosition: assignedPosition,
-          team: randomTeam,
+          assignedPosition: 'primary',
+          team: 'blue', // Default to blue, but this is not ideal
           profilePicture: user.profilePicture
         };
       }
@@ -392,7 +386,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       console.log('Found or assigned user player:', foundPlayer);
       setUserPlayer(foundPlayer);
     }
-  }, [match, user]);
+  }, [match, user, gameMode]);
 
   const handleBackClick = () => {
     console.log('Back button clicked');
@@ -666,7 +660,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
                         {match && match.team1.map((player, index) => (
-                          <li key={`blue-${player.userId}-${index}`} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
+                          <li key={`blue-${player.userId}-${index}`} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player.userId)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
                                 <Image
@@ -682,7 +676,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                             </div>
                             <span className="text-blue-600">{player.name}</span>
                             <span className="text-sm text-gray-500">
-                              ({player.assignedPosition === 'primary' ? player.position : player.secondaryPosition})
+                            ({player.position})
                             </span>
                           </li>
                         ))}
@@ -694,7 +688,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
                         {match && match.team2.map((player, index) => (
-                          <li key={`red-${player.userId}-${index}`} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player)}>
+                          <li key={`red-${player.userId}-${index}`} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player.userId)}>
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
                                 <Image
@@ -710,7 +704,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                             </div>
                             <span className="text-red-600">{player.name}</span>
                             <span className="text-sm text-gray-500">
-                              ({player.assignedPosition === 'primary' ? player.position : player.secondaryPosition})
+                            ({player.position})
                             </span>
                           </li>
                         ))}

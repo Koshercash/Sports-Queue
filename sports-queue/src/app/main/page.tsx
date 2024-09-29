@@ -22,6 +22,7 @@ import AdminDashboard from '@/components/AdminDashboard';
 import { jwtDecode } from "jwt-decode";
 import { LeaderboardPlayer } from '@/types/leaderboard';
 import { GameStateProvider } from '@/components/GameStateProvider';
+import Image from 'next/image';
 
 interface UserProfile {
   id: string;
@@ -193,6 +194,16 @@ export default function MainScreen() {
         setIsGameInProgress(true);
         setLobbyTime(parsedGameState.lobbyTime || 0);
         setQueueStatus('matched');
+        // Ensure the user is on the correct team
+        const userTeam = parsedGameState.userTeam;
+        if (userTeam) {
+          const updatedMatch = {
+            ...parsedGameState.match,
+            team1: parsedGameState.match.team1.map((p: any) => ({...p, team: 'blue'})),
+            team2: parsedGameState.match.team2.map((p: any) => ({...p, team: 'red'}))
+          };
+          setMatch(updatedMatch);
+        }
         console.log('Game state updated for return to game');
       } else {
         console.log('No valid game to return to');
@@ -292,13 +303,22 @@ export default function MainScreen() {
   const fetchUserProfile = async (userId?: string) => {
     try {
       const token = localStorage.getItem('token');
-      const url = userId 
-        ? `${API_BASE_URL}/api/user/${userId}`
-        : `${API_BASE_URL}/api/user-profile`;
+      console.log('Token:', token ? 'exists' : 'not found');
+      
+      let url;
+      if (userId) {
+        console.log('Fetching profile for player:', userId);
+        url = `${API_BASE_URL}/api/user/${userId}`;
+      } else {
+        console.log('Fetching current user profile');
+        url = `${API_BASE_URL}/api/user-profile`;
+      }
       
       const response = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      
+      console.log('User profile response:', response.data);
       
       const userData = {
         ...response.data,
@@ -315,10 +335,11 @@ export default function MainScreen() {
       }
     } catch (error) {
       console.error('Failed to fetch user profile:', error);
-      if (axios.isAxiosError(error) && error.response?.status === 401) {
-        localStorage.removeItem('token');
-        router.push('/');
+      if (axios.isAxiosError(error)) {
+        console.error('Error response:', error.response?.data);
+        console.error('Error status:', error.response?.status);
       }
+      alert('Failed to load user profile. Please try again.');
     }
   };
 
@@ -492,7 +513,7 @@ export default function MainScreen() {
     try {
       const token = localStorage.getItem('token');
       if (!token) {
-        console.error('No token found');
+        console.error('No token found for match history fetch');
         return;
       }
       console.log('Fetching match history...');
@@ -500,34 +521,105 @@ export default function MainScreen() {
         headers: { Authorization: `Bearer ${token}` },
         params: { limit: 5 }
       });
-      console.log('Fetched match history:', response.data);
-      setMatchHistory(response.data);
-
-      const sampleMatch: RecentGame = {
-        id: 'sample-match-id',
-        mode: '5v5',
-        blueScore: 3,
-        redScore: 2,
-        location: 'Sample Stadium',
-        endTime: new Date().toISOString(),
-        players: [
-          { id: 'player1', name: 'John Doe' },
-          { id: 'player2', name: 'Jane Smith' },
-          { id: 'player3', name: 'Bob Johnson' },
-          { id: 'player4', name: 'Alice Brown' },
-          { id: 'player5', name: 'Charlie Davis' },
-        ],
-        distance: 5,
-        mmrChange: 10,
-        averageMMR: 1500
-      };
-
-      setMatchHistory([sampleMatch, ...response.data]);
+      console.log('Raw match history response:', response.data);
+      
+      let games = response.data;
+      
+      // Add a sample game if no games are returned
+      if (games.length === 0) {
+        const sampleGame: RecentGame = {
+          id: 'sample-match-id',
+          mode: '5v5',
+          blueScore: 3,
+          redScore: 2,
+          location: 'Sample Stadium',
+          endTime: new Date().toISOString(),
+          players: [
+            { id: 'player1', name: 'John Doe', profilePicture: null },
+            { id: 'player2', name: 'Jane Smith', profilePicture: null },
+            { id: 'player3', name: 'Bob Johnson', profilePicture: null },
+            { id: 'player4', name: 'Alice Brown', profilePicture: null },
+            { id: 'player5', name: 'Charlie Davis', profilePicture: null },
+          ],
+          distance: 5,
+          mmrChange: 10,
+          averageMMR: 1500
+        };
+        games = [sampleGame];
+      }
+      
+      setMatchHistory(games);
       setShouldRefreshMatchHistory(false);
     } catch (error) {
       console.error('Failed to fetch match history:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Error response:', error.response?.data);
+      }
+      setMatchHistory([]); // Set to empty array on error
     }
   };
+
+  const fetchRecentGames = async () => {
+    if (latitude && longitude) {
+      try {
+        const token = localStorage.getItem('token');
+        console.log('Fetching recent games...');
+        const response = await axios.get<RecentGame[]>(`${API_BASE_URL}/api/games/recent`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { latitude, longitude }
+        });
+        console.log('Raw recent games response:', response.data);
+        
+        let nearbyGames = response.data.filter(game => game.distance <= 50);
+        
+        // Add a sample game if no games are returned
+        if (nearbyGames.length === 0) {
+          const sampleGame: RecentGame = {
+            id: 'sample-recent-game-id',
+            mode: '11v11',
+            blueScore: 2,
+            redScore: 2,
+            location: 'Nearby Field',
+            endTime: new Date().toISOString(),
+            players: [
+              { id: 'player1', name: 'Alex Johnson', profilePicture: null },
+              { id: 'player2', name: 'Sam Wilson', profilePicture: null },
+              // ... add more sample players as needed
+            ],
+            distance: 3,
+            mmrChange: 0,
+            averageMMR: 1600
+          };
+          nearbyGames = [sampleGame];
+        }
+        
+        const allGames = [...nearbyGames, ...matchHistory];
+        const uniqueGames = allGames.filter((game, index, self) =>
+          index === self.findIndex((t) => t.id === game.id)
+        );
+        
+        uniqueGames.sort((a, b) => new Date(b.endTime).getTime() - new Date(a.endTime).getTime());
+        
+        setRecentGames(uniqueGames);
+      } catch (error) {
+        console.error('Failed to fetch recent games:', error);
+        if (axios.isAxiosError(error)) {
+          console.error('Error response:', error.response?.data);
+        }
+        setRecentGames([]); // Set to empty array on error
+      }
+    }
+  };
+  
+  useEffect(() => {
+    const fetchData = async () => {
+      await fetchMatchHistory();
+      if (latitude && longitude) {
+        await fetchRecentGames();
+      }
+    };
+    fetchData();
+  }, [latitude, longitude]);
 
   const handleBioChange = async (newBio: string) => {
     try {
@@ -705,6 +797,7 @@ export default function MainScreen() {
     
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      console.log('WebSocket message received:', data);
       if (data.type === 'match_found') {
         console.log('Match found:', data.matchDetails);
         setQueueStatus('matched');
@@ -742,64 +835,27 @@ export default function MainScreen() {
     return () => {
       ws.close();
     };
-  }, []);
+  }, [gameMode]);
  
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (isGameInProgress && !inGame) {
-      const savedGameState = localStorage.getItem('gameState');
-      if (savedGameState) {
-        const parsedGameState = JSON.parse(savedGameState);
-        const elapsedTime = Math.floor((Date.now() - parsedGameState.lastUpdated) / 1000);
-        setLobbyTime(parsedGameState.lobbyTime + elapsedTime);
-      }
-
+    if (isGameInProgress) {
       timer = setInterval(() => {
-        setLobbyTime(prevTime => {
-          const newTime = prevTime + 1;
-          const updatedGameState = JSON.parse(localStorage.getItem('gameState') || '{}');
-          updatedGameState.lobbyTime = newTime;
-          updatedGameState.lastUpdated = Date.now();
-          localStorage.setItem('gameState', JSON.stringify(updatedGameState));
-          return newTime;
-        });
+        const savedGameState = localStorage.getItem('gameState');
+        if (savedGameState) {
+          const parsedGameState = JSON.parse(savedGameState);
+          const newTime = parsedGameState.lobbyTime + 1;
+          setLobbyTime(newTime);
+          localStorage.setItem('gameState', JSON.stringify({
+            ...parsedGameState,
+            lobbyTime: newTime,
+            lastUpdated: Date.now()
+          }));
+        }
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [isGameInProgress, inGame]);
-
-  useEffect(() => {
-    const fetchRecentGames = async () => {
-      if (latitude && longitude) {
-        try {
-          const token = localStorage.getItem('token');
-          const response = await axios.get<RecentGame[]>(`${API_BASE_URL}/api/games/recent`, {
-            headers: { Authorization: `Bearer ${token}` },
-            params: { latitude, longitude }
-          });
-          
-          const nearbyGames = response.data.filter(game => game.distance <= 50);
-
-          const allGames = [...nearbyGames, ...matchHistory];
-          const uniqueGames = allGames.filter((game, index, self) =>
-            index === self.findIndex((t) => t.id === game.id)
-          );
-          
-          uniqueGames.sort((a, b) => new Date(b.endTime).getTime() - new Date(a.endTime).getTime());
-          
-          setRecentGames(uniqueGames);
-        } catch (error) {
-          console.error('Failed to fetch recent games:', error);
-        }
-      }
-    };
-
-    fetchRecentGames();
-  }, [latitude, longitude, matchHistory]);
-
-  useEffect(() => {
-    fetchMatchHistory();
-  }, [shouldRefreshMatchHistory]);
+  }, [isGameInProgress]);
 
   useEffect(() => {
     const savedGameState = localStorage.getItem('gameState');
@@ -830,9 +886,10 @@ export default function MainScreen() {
   }, []);
 
   const handlePlayerClick = (playerId: string) => {
+    console.log('Clicked player ID:', playerId);
     fetchUserProfile(playerId);
   };
-
+  
   const fetchLeaderboard = useCallback(async (page = 1) => {
     try {
       setIsLoadingMore(true);
@@ -860,12 +917,15 @@ export default function MainScreen() {
       }
       setLeaderboardPage(page);
       setIsLoadingMore(false);
-    } catch (error) {
+    }  catch (error) {
       console.error('Failed to fetch leaderboard:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Axios error details:', error.response?.data);
+      }
       setIsLoadingMore(false);
     }
   }, [leaderboardMode, leaderboardGender, leaderboardSearch]);
-
+  
   const handleLoadMore = () => {
     fetchLeaderboard(leaderboardPage + 1);
   };
@@ -971,35 +1031,39 @@ export default function MainScreen() {
                 </TabsContent>
                 <TabsContent value="profile">
                   <Card>
-                    <CardHeader>
-                      <CardTitle>Your Profile</CardTitle>
-                      <CardDescription>View and edit your profile information</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {userProfile && (
-                        <>
-                          <Tabs defaultValue="info" className="w-full">
-                            <TabsList className="grid w-full grid-cols-2 mb-6">
-                              <TabsTrigger value="info">Info</TabsTrigger>
-                              <TabsTrigger value="matchHistory">Match History</TabsTrigger>
-                            </TabsList>
-                            <TabsContent value="info">
-                              <UserProfile
-                                {...userProfile}
-                                isCurrentUser={true}
-                                onProfilePictureChange={handleProfilePictureChange}
-                                onBioChange={handleBioChange}
-                              />
-                            </TabsContent>
-                            <TabsContent value="matchHistory">
-                              <MatchHistory matches={matchHistory} currentUserId={userProfile?.id || ''} onPlayerClick={handlePlayerClick} />
-                            </TabsContent>
-                          </Tabs>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabsContent>
+                  <CardHeader>
+                 <CardTitle>Your Profile</CardTitle>
+               <CardDescription>View and edit your profile information</CardDescription>
+             </CardHeader>
+            <CardContent>
+              {userProfile && (
+              <>
+              <Tabs defaultValue="info" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-6">
+                  <TabsTrigger value="info">Info</TabsTrigger>
+                  <TabsTrigger value="matchHistory">Match History</TabsTrigger>
+                </TabsList>
+                <TabsContent value="info">
+                  <UserProfile
+                   {...userProfile}
+                   isCurrentUser={true}
+                   onProfilePictureChange={handleProfilePictureChange}
+                   onBioChange={handleBioChange}
+                  />
+               </TabsContent>
+               <TabsContent value="matchHistory">
+                  {matchHistory.length > 0 ? (
+                    <MatchHistory matches={matchHistory} currentUserId={userProfile?.id || ''} onPlayerClick={handlePlayerClick} />
+                  ) : (
+                    <p>No match history available.</p>
+                 )}
+               </TabsContent>
+              </Tabs>
+            </>
+          )}
+       </CardContent>
+      </Card>
+      </TabsContent>
                 <TabsContent value="recent">
                   <Card>
                     <CardHeader>
@@ -1086,65 +1150,41 @@ export default function MainScreen() {
                       <h3 className="text-lg font-semibold mb-2">
                         Top {leaderboardGender === 'male' ? 'Male' : 'Female'} Players ({leaderboardMode})
                       </h3>
-                      <div className="flex space-x-4">
-                        <div className="w-1/2 space-y-2">
-                          {leaderboardPlayers
-                            .filter(player => player.name.toLowerCase().includes(leaderboardSearch.toLowerCase()))
-                            .slice(0, Math.ceil(leaderboardPlayers.length / 2))
-                            .map((player) => (
-                              <div key={player.id} className="flex items-center justify-between bg-white p-2 rounded-lg shadow">
-                                <div className="flex items-center space-x-2">
-                                  <span className="text-sm font-semibold w-6 text-right">#{player.rank}</span>
-                                  <div className="rounded-full overflow-hidden w-8 h-8">
-                                    <InteractableProfilePicture
-                                      currentImage={player.profilePicture}
-                                      onClick={() => handlePlayerClick(player.id)}
-                                      size="small"
-                                    />
-                                  </div>
-                                  <span className="text-sm font-semibold">{player.name}</span>
-                                </div>
-                                <span className="text-sm font-bold text-green-600">MMR: {player.mmr}</span>
-                              </div>
-                            ))}
-                        </div>
-                        <div className="w-1/2 space-y-2">
-                          {leaderboardPlayers
-                            .filter(player => player.name.toLowerCase().includes(leaderboardSearch.toLowerCase()))
-                            .slice(Math.ceil(leaderboardPlayers.length / 2))
-                            .map((player) => (
-                              <div key={player.id} className="flex items-center justify-between bg-white p-2 rounded-lg shadow">
-                                <div className="flex items-center space-x-2">
-                                  <span className="text-sm font-semibold w-6 text-right">#{player.rank}</span>
-                                  <div className="rounded-full overflow-hidden w-8 h-8">
-                                    <InteractableProfilePicture
-                                      currentImage={player.profilePicture}
-                                      onClick={() => handlePlayerClick(player.id)}
-                                      size="small"
-                                    />
-                                  </div>
-                                  <span className="text-sm font-semibold">{player.name}</span>
-                                </div>
-                                <span className="text-sm font-bold text-green-600">MMR: {player.mmr}</span>
-                              </div>
-                            ))}
-                        </div>
-                      </div>
-                      {leaderboardPlayers.length < 1000 && !isLoadingMore && (
-                        <Button 
-                          onClick={handleLoadMore} 
-                          className="w-full mt-4"
-                          disabled={isLoadingMore}
-                        >
-                          Load More
-                        </Button>
-                      )}
-                      {isLoadingMore && (
-                        <p className="text-center mt-4">Loading more players...</p>
-                      )}
-                    </div>
-                  </div>
-                </TabsContent>
+                    <div className="space-y-2">
+                     {leaderboardPlayers
+                    .filter(player => player.name.toLowerCase().includes(leaderboardSearch.toLowerCase()))
+                    .map((player) => (
+                      <div key={player.id} className="flex items-center justify-between bg-white p-2 rounded-lg shadow">
+                    <div className="flex items-center space-x-2">
+                     <span className="text-sm font-semibold w-6 text-right">#{player.rank}</span>
+                    <div className="rounded-full overflow-hidden w-8 h-8 cursor-pointer" onClick={() => handlePlayerClick(player.id)}>
+                    <InteractableProfilePicture
+                     currentImage={player.profilePicture}
+                     onClick={() => handlePlayerClick(player.id)}
+                     size="small"
+                  />
+                </div>
+                <span className="text-sm font-semibold cursor-pointer" onClick={() => handlePlayerClick(player.id)}>{player.name}</span>
+              </div>
+              <span className="text-sm font-bold text-green-600">MMR: {player.mmr}</span>
+            </div>
+          ))}
+      </div>
+      {leaderboardPlayers.length < 1000 && !isLoadingMore && (
+        <Button 
+          onClick={handleLoadMore} 
+          className="w-full mt-4"
+          disabled={isLoadingMore}
+        >
+          Load More
+        </Button>
+        )}
+        {isLoadingMore && (
+          <p className="text-center mt-4">Loading more players...</p>
+         )}
+       </div>
+      </div>
+        </TabsContent>
                 <TabsContent value="friends" className="h-[calc(100vh-260px)] overflow-y-auto">
                   <Card>
                     <CardHeader>

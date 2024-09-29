@@ -365,6 +365,7 @@ async function startServer() {
   
       next();
     } catch (error) {
+      console.error('Error in authMiddleware:', error);
       res.status(401).json({ error: 'Invalid token' });
     }
   };
@@ -794,7 +795,7 @@ async function checkForMatches(gameMode) {
   const matchCreated = await tryCreateMatch(gameMode, modeField, playerCount, requiredPositions);
   if (matchCreated) {
     console.log(`Match created for ${gameMode}:`, matchCreated);
-    notifyMatchedPlayers(matchCreated.players, matchCreated);
+    // notifyMatchedPlayers is now called inside tryCreateMatch
   } else {
     console.log(`Failed to create ${gameMode} match`);
   }
@@ -802,8 +803,11 @@ async function checkForMatches(gameMode) {
 
 function notifyMatchedPlayers(matchedPlayers, matchDetails) {
   wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN && matchedPlayers.includes(client.userId)) {
-      client.send(JSON.stringify({ type: 'match_found', matchDetails }));
+    if (client.readyState === WebSocket.OPEN && client.userId) {
+      const playerInMatch = matchedPlayers.find(p => p.id.toString() === client.userId);
+      if (playerInMatch) {
+        client.send(JSON.stringify({ type: 'match_found', matchDetails }));
+      }
     }
   });
 }
@@ -821,11 +825,17 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     return null;
   }
 
-  const randomRealPlayer = realPlayersInQueue[Math.floor(Math.random() * realPlayersInQueue.length)];
-  match.push({ userId: randomRealPlayer.userId, position: requiredPositions[0] });
-  await Queue.deleteOne({ userId: randomRealPlayer.userId._id, gameMode });
+  // Assign the first real player to the blue team
+  const firstRealPlayer = realPlayersInQueue[Math.floor(Math.random() * realPlayersInQueue.length)];
+  const suitablePosition = isPlayerSuitableForPosition(firstRealPlayer.userId, 'goalkeeper') ? 'goalkeeper' : 'non-goalkeeper';
+  match.push({ 
+    userId: firstRealPlayer.userId, 
+    position: suitablePosition,
+    team: 'blue'
+  });
+  await Queue.deleteOne({ userId: firstRealPlayer.userId._id, gameMode });
 
-  let baseMMR = randomRealPlayer.userId[modeField];
+  let baseMMR = firstRealPlayer.userId[modeField];
 
   for (let i = 1; i < requiredPositions.length; i++) {
     const position = requiredPositions[i];
@@ -847,7 +857,11 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
         player = selectBestPlayer(suitablePlayers, position);
         console.log(`Selected player: ${player.name} (Primary: ${player.position}, Secondary: ${player.secondaryPosition}, MMR: ${player[modeField]}) for position ${position}`);
         await Queue.deleteOne({ userId: player._id, gameMode });
-        match.push({ userId: player, position });
+        match.push({ 
+          userId: player, 
+          position,
+          team: i < playerCount / 2 ? 'blue' : 'red'
+        });
       } else {
         console.log(`No suitable player found for ${position}, increasing MMR range`);
         currentMMRRange += 100;
@@ -861,43 +875,37 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     }
   }
 
-  if (match.length !== playerCount) {
-    console.log(`Match creation failed. Players found: ${match.length}`);
-    await returnPlayersToQueue(match, gameMode);
-    return null;
-  }
+  if (match.length === playerCount) {
+    console.log(`Successfully created match with ${match.length} players, including at least one real player`);
 
-  console.log(`Successfully created match with ${match.length} players, including at least one real player`);
+    try {
+      const newGame = new Game({
+        players: match.map(p => p.userId._id),
+        gameMode,
+        status: 'lobby',
+        startTime: new Date()
+      });
 
-  try {
-    const newGame = new Game({
-      players: match.map(p => p.userId._id),
-      gameMode,
-      status: 'lobby',
-      startTime: new Date()
-    });
+      await newGame.save();
 
-    await newGame.save();
+      const matchResult = {
+        gameId: newGame._id,
+        team1: formatTeamData(match.filter(p => p.team === 'blue'), modeField),
+        team2: formatTeamData(match.filter(p => p.team === 'red'), modeField)
+      };
 
-    const team1 = match.slice(0, playerCount / 2);
-    const team2 = match.slice(playerCount / 2);
+      notifyMatchedPlayers(matchResult.team1.concat(matchResult.team2), matchResult);
 
-    const matchResult = {
-      gameId: newGame._id,
-      team1: formatTeamData(team1, modeField),
-      team2: formatTeamData(team2, modeField)
-    };
-
-    if (matchResult) {
-      const matchedPlayerIds = match.map(p => p.userId._id.toString());
-      notifyMatchedPlayers(matchedPlayerIds, matchResult);
+      return matchResult;
+    } catch (error) {
+      console.error('Error creating game:', error);
+      return null;
     }
-
-    return matchResult;
-  } catch (error) {
-    console.error('Error creating game:', error);
-    return null;
   }
+
+  console.log(`Match creation failed. Players found: ${match.length}`);
+  await returnPlayersToQueue(match, gameMode);
+  return null;
 }
 
 function isPlayerSuitableForPosition(player, position) {
@@ -924,14 +932,17 @@ async function returnPlayersToQueue(match, gameMode) {
     await Queue.create({ userId: matchedPlayer.userId._id, gameMode, joinedAt: new Date() });
   }
 }
-
 function formatTeamData(team, modeField) {
   return team.map(p => ({ 
     id: p.userId._id, 
     name: p.userId.name || 'Unknown',
     mmr: p.userId[modeField],
     position: p.position,
-    isReal: !p.userId.email.startsWith('dummy')
+    primaryPosition: p.userId.position,
+    secondaryPosition: p.userId.secondaryPosition,
+    profilePicture: p.userId.profilePicturePath ? `/uploads/${p.userId.profilePicturePath}` : null,
+    isReal: !p.userId.email.startsWith('dummy'),
+    team: p.team
   }));
 }
 
@@ -995,32 +1006,56 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
     }
   });
 
+  app.get('/api/user/match-history', authMiddleware, async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 5;
+      console.log(`Fetching match history for user ${req.userId}, limit: ${limit}`);
+      
+      const matches = await GameResult.find({ players: req.userId })
+        .sort({ endTime: -1 })
+        .limit(limit)
+        .populate('players', 'name profilePicturePath');
   
+      const formattedMatches = matches.map(match => ({
+        id: match._id,
+        mode: match.mode,
+        blueScore: match.blueScore,
+        redScore: match.redScore,
+        location: match.location,
+        endTime: match.endTime,
+        players: match.players.map(player => ({
+          id: player._id,
+          name: player.name,
+          profilePicture: player.profilePicturePath ? `/uploads/${player.profilePicturePath}` : null
+        })),
+        mmrChange: match.mmrChanges.find(change => change.userId.toString() === req.userId.toString())?.change || 0
+      }));
+  
+      console.log('Sending match history:', formattedMatches);
+      res.json(formattedMatches);
+    } catch (error) {
+      console.error('Error fetching match history:', error);
+      res.status(500).json({ error: 'Failed to fetch match history', details: error.message });
+    }
+  });
   // Update the /api/user/:id endpoint
   app.get('/api/user/:id', authMiddleware, async (req, res) => {
     try {
       console.log('Fetching user data for ID:', req.params.id);
       const userId = req.params.id;
-      if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+      if (!userId || userId === 'undefined') {
+        return res.status(400).json({ error: 'Invalid User ID' });
       }
-
-      // Check if the ID is 'match-history' and handle it separately
-      if (userId === 'match-history') {
-        return handleMatchHistory(req, res);
-      }
-
+  
       const user = await User.findById(userId);
       
       if (!user) {
         console.log('User not found for ID:', userId);
         return res.status(404).json({ error: 'User not found' });
       }
-
-      const isCurrentUser = req.userId === userId;
-
+  
       const userData = {
-        id: user._id.toString(), // Convert ObjectId to string
+        id: user._id.toString(),
         name: user.name,
         email: user.email,
         phone: user.phone,
@@ -1030,13 +1065,13 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
         skillLevel: user.skillLevel,
         dateOfBirth: user.dateOfBirth,
         profilePicture: user.profilePicturePath ? `/uploads/${user.profilePicturePath}` : null,
-        isCurrentUser: isCurrentUser,
+        isCurrentUser: req.userId === userId,
         mmr5v5: user.mmr5v5,
         mmr11v11: user.mmr11v11,
         bio: user.bio,
-        cityTown: user.cityTown, // Add this line
+        cityTown: user.cityTown,
       };
-
+  
       console.log('Sending user data:', userData);
       res.json(userData);
     } catch (error) {
@@ -1044,45 +1079,6 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
       res.status(500).json({ error: 'Internal server error', details: error.message });
     }
   });
-  
-  // Add this new route for match history
-  app.get('/api/user/match-history', authMiddleware, handleMatchHistory);
-
-  async function handleMatchHistory(req, res) {
-    try {
-      const userId = req.userId; // Use the authenticated user's ID
-      const limit = parseInt(req.query.limit) || 5;
-      console.log(`Fetching match history for user ${userId}, limit: ${limit}`);
-      
-      const matches = await GameResult.find({ players: userId })
-        .sort({ endTime: -1 })
-        .limit(limit)
-        .populate('players', 'name profilePicturePath');
-  
-      const formattedMatches = matches.map(match => {
-        const userMmrChange = match.mmrChanges.find(change => change.userId.toString() === userId.toString());
-        return {
-          id: match._id,
-          mode: match.mode,
-          blueScore: match.blueScore,
-          redScore: match.redScore,
-          location: match.location,
-          endTime: match.endTime,
-          players: match.players.map(player => ({
-            id: player._id,
-            name: player.name,
-            profilePicture: player.profilePicturePath ? `/uploads/${player.profilePicturePath}` : null
-          })),
-          mmrChange: userMmrChange ? userMmrChange.change : 0
-        };
-      });
-  
-      res.json(formattedMatches);
-    } catch (error) {
-      console.error('Error fetching match history:', error);
-      res.status(500).json({ error: 'Failed to fetch match history' });
-    }
-  }
 
   // Update profile picture
   app.post('/api/user/profile-picture', authMiddleware, upload.single('profilePicture'), async (req, res) => {
@@ -1213,6 +1209,7 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
     try {
       const { latitude, longitude } = req.query;
       const userLocation = { latitude: parseFloat(latitude), longitude: parseFloat(longitude) };
+      console.log('Fetching recent games near:', userLocation);
   
       const recentGames = await GameResult.find({
         coordinates: {
@@ -1227,34 +1224,44 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
       })
         .sort({ endTime: -1 })
         .limit(10)
-        .populate('players', 'name mmr5v5 mmr11v11');
+        .populate('players', 'name profilePicturePath');
   
-      const gamesWithDistanceAndMMR = recentGames.map(game => {
-        const distance = geolib.getDistance(
-          userLocation,
-          { latitude: game.coordinates.coordinates[1], longitude: game.coordinates.coordinates[0] }
-        );
-
-        // Calculate average MMR
-        const totalMMR = game.players.reduce((sum, player) => {
-          return sum + (game.mode === '5v5' ? player.mmr5v5 : player.mmr11v11);
-        }, 0);
-        const averageMMR = Math.round(totalMMR / game.players.length);
-
+      const formattedGames = recentGames.map(game => {
+        const distance = calculateDistance(userLocation, game.coordinates.coordinates);
         return {
-          ...game.toObject(),
+          id: game._id,
+          mode: game.mode,
+          blueScore: game.blueScore,
+          redScore: game.redScore,
+          location: game.location,
+          endTime: game.endTime,
           distance: Math.round(distance / 1609.34), // Convert meters to miles and round
-          averageMMR
+          players: game.players.map(player => ({
+            id: player._id,
+            name: player.name,
+            profilePicture: player.profilePicturePath ? `/uploads/${player.profilePicturePath}` : null
+          })),
+          averageMMR: calculateAverageMMR(game)
         };
       });
   
-      res.json(gamesWithDistanceAndMMR);
+      console.log('Sending recent games:', formattedGames);
+      res.json(formattedGames);
     } catch (error) {
       console.error('Error fetching recent games:', error);
       res.status(500).json({ error: 'Failed to fetch recent games' });
     }
   });
-
+  
+  // Helper function to calculate distance between two points
+  function calculateDistance(point1, point2) {
+    // Implement distance calculation logic here
+    // You can use a library like geolib or implement the Haversine formula
+  }
+  
+  function calculateAverageMMR(game) {
+    // Implement average MMR calculation logic here
+  }
   // Add this new route for leaderboard data
   app.get('/api/leaderboard', authMiddleware, async (req, res) => {
     try {
@@ -1414,11 +1421,13 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
     try {
       const limit = parseInt(req.query.limit) || 5;
       console.log(`Fetching match history for user ${req.userId}, limit: ${limit}`);
+      
+      // Change this line
       const matches = await GameResult.find({ players: req.userId })
         .sort({ endTime: -1 })
         .limit(limit)
-        .populate('players', 'name');
-
+        .populate('players', 'name profilePicturePath');
+  
       const formattedMatches = matches.map(match => ({
         id: match._id,
         mode: match.mode,
@@ -1426,13 +1435,19 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
         redScore: match.redScore,
         location: match.location,
         endTime: match.endTime,
-        players: match.players.map(player => ({ id: player._id, name: player.name }))
+        players: match.players.map(player => ({
+          id: player._id,
+          name: player.name,
+          profilePicture: player.profilePicturePath ? `/uploads/${player.profilePicturePath}` : null
+        })),
+        mmrChange: match.mmrChanges.find(change => change.userId.toString() === req.userId.toString())?.change || 0
       }));
-
+  
+      console.log('Sending match history:', formattedMatches);
       res.json(formattedMatches);
     } catch (error) {
       console.error('Error fetching match history:', error);
-      res.status(500).json({ error: 'Failed to fetch match history' });
+      res.status(500).json({ error: 'Failed to fetch match history', details: error.message });
     }
   });
 
