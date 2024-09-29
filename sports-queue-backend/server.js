@@ -25,7 +25,9 @@ const wss = new WebSocketServer({ server });
 
 app.use(express.json());
 app.use(cors({
-  origin: 'http://localhost:3000', // make sure this matches your frontend URL
+  origin: 'http://localhost:3000', // or whatever your frontend URL is
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
 
@@ -805,7 +807,6 @@ function notifyMatchedPlayers(matchedPlayers, matchDetails) {
     }
   });
 }
-
 async function tryCreateMatch(gameMode, modeField, playerCount, requiredPositions) {
   console.log(`Attempting to create match for ${gameMode}`);
   const match = [];
@@ -887,6 +888,11 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
       team2: formatTeamData(team2, modeField)
     };
 
+    if (matchResult) {
+      const matchedPlayerIds = match.map(p => p.userId._id.toString());
+      notifyMatchedPlayers(matchedPlayerIds, matchResult);
+    }
+
     return matchResult;
   } catch (error) {
     console.error('Error creating game:', error);
@@ -895,18 +901,22 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
 }
 
 function isPlayerSuitableForPosition(player, position) {
-  return position === 'goalkeeper' 
-    ? (player.position === 'goalkeeper' || player.secondaryPosition === 'goalkeeper')
-    : (player.position !== 'goalkeeper' || player.secondaryPosition !== 'goalkeeper');
+  if (position === 'goalkeeper') {
+    return player.position === 'goalkeeper' || player.secondaryPosition === 'goalkeeper';
+  } else {
+    return player.position !== 'goalkeeper' || player.secondaryPosition !== 'goalkeeper';
+  }
 }
 
 function selectBestPlayer(players, position) {
   const priorityPlayers = players.filter(p => 
     p.userId.position === position || p.userId.secondaryPosition === position
   );
-  return (priorityPlayers.length > 0 
-    ? priorityPlayers[Math.floor(Math.random() * priorityPlayers.length)]
-    : players[Math.floor(Math.random() * players.length)]).userId;
+  if (priorityPlayers.length > 0) {
+    return priorityPlayers[Math.floor(Math.random() * priorityPlayers.length)].userId;
+  }
+  // If no priority players, select a random player
+  return players[Math.floor(Math.random() * players.length)].userId;
 }
 
 async function returnPlayersToQueue(match, gameMode) {
@@ -1427,7 +1437,7 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
   });
 
   const PORT = process.env.PORT || 3002;
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
 

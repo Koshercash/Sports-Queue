@@ -217,32 +217,34 @@ export default function MainScreen() {
   const toggleQueue = async () => {
     console.log('toggleQueue function called');
     console.log('Current state:', { queueStatus, isGameInProgress, gameState, isPenalized });
-    
+  
     if (isPenalized) {
       console.log('User is penalized, cannot join queue');
       alert(`You are currently penalized and cannot join games until ${penaltyEndTime?.toLocaleString()}`);
       return;
     }
-
-    if (queueStatus === 'idle') {
-      console.log('Attempting to join queue');
-      setQueueStatus('queuing');
-      
-      // Force a re-render
-      await new Promise(resolve => setTimeout(resolve, 0));
-      
-      console.log('Updated state after setting to queuing:', { queueStatus: 'queuing', isGameInProgress: false, gameState: 'idle' });
-
-      try {
-        const token = localStorage.getItem('token');
-        console.log('Sending request to join queue');
+  
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No token found');
+        alert('You need to be logged in to join the queue');
+        return;
+      }
+  
+      if (queueStatus === 'idle') {
+        console.log('Attempting to join queue');
+        setQueueStatus('queuing');
+        
         const response = await axios.post(`${API_BASE_URL}/api/queue/join`, 
           { gameMode },
           { headers: { Authorization: `Bearer ${token}` } }
         );
         console.log('Queue join response:', response.data);
+        
         if (response.data.match) {
-          console.log('Match found:', response.data.match);
+          // Handle immediate match
+          console.log('Immediate match found:', response.data.match);
           setQueueStatus('matched');
           setMatch(response.data.match);
           setGameState('loading');
@@ -255,36 +257,35 @@ export default function MainScreen() {
             lobbyTime: 0,
             gameEnded: false,
             savedAt: new Date().toISOString(),
-            matchId: response.data.match.id
+            matchId: response.data.match.gameId
           };
-          console.log('Saving game state:', gameStateToSave);
           localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
           
           setTimeout(() => {
-            console.log('Setting game state to inGame');
             setGameState('inGame');
             setInGame(true);
             setLobbyTime(0);
           }, 3000);
         }
-      } catch (error) {
-        console.error('Error joining queue:', error);
-        setQueueStatus('idle');
-      }
-    } else if (queueStatus === 'queuing') {
-      console.log('Attempting to leave queue');
-      try {
-        const token = localStorage.getItem('token');
-        await axios.post(`${API_BASE_URL}/api/queue/leave`, 
+      } else if (queueStatus === 'queuing') {
+        console.log('Attempting to leave queue');
+        const response = await axios.post(`${API_BASE_URL}/api/queue/leave`, 
           { gameMode },
           { headers: { Authorization: `Bearer ${token}` } }
         );
+        console.log('Queue leave response:', response.data);
         setQueueStatus('idle');
         setDots('');
-      } catch (error) {
-        console.error('Failed to leave queue:', error);
-        alert('Failed to leave queue. Please try again.');
       }
+    } catch (error) {
+      console.error('Error in toggleQueue:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Axios error details:', error.response?.data);
+        alert(`Failed to ${queueStatus === 'idle' ? 'join' : 'leave'} queue: ${error.response?.data?.error || 'Unknown error'}. Please try again.`);
+      } else {
+        alert('An unexpected error occurred. Please try again.');
+      }
+      setQueueStatus('idle');
     }
   };
 
@@ -689,7 +690,60 @@ export default function MainScreen() {
 
     return () => clearInterval(intervalId);
   }, [router]);
-
+  
+  useEffect(() => {
+    const ws = new WebSocket(`ws://${window.location.hostname}:${process.env.NEXT_PUBLIC_SERVER_PORT || 3002}`);
+    
+    ws.onopen = () => {
+      console.log('WebSocket connected');
+      const token = localStorage.getItem('token');
+      if (token) {
+        const decoded = jwtDecode(token) as { userId: string };
+        ws.send(JSON.stringify({ type: 'auth', userId: decoded.userId }));
+      }
+    };
+    
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'match_found') {
+        console.log('Match found:', data.matchDetails);
+        setQueueStatus('matched');
+        setMatch(data.matchDetails);
+        setGameState('loading');
+        setIsGameInProgress(true);
+        
+        const gameStateToSave = {
+          gameState: 'lobby',
+          match: data.matchDetails,
+          mode: gameMode,
+          lobbyTime: 0,
+          gameEnded: false,
+          savedAt: new Date().toISOString(),
+          matchId: data.matchDetails.gameId
+        };
+        localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
+        
+        setTimeout(() => {
+          setGameState('inGame');
+          setInGame(true);
+          setLobbyTime(0);
+        }, 3000);
+      }
+    };
+    
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+  
+    ws.onclose = () => {
+      console.log('WebSocket connection closed');
+    };
+    
+    return () => {
+      ws.close();
+    };
+  }, []);
+ 
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (isGameInProgress && !inGame) {
