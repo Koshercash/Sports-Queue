@@ -215,25 +215,27 @@ export default function MainScreen() {
   };
 
   const toggleQueue = async () => {
-    console.log('Toggle Queue called. Current state:', { queueStatus, isGameInProgress, gameState });
+    console.log('toggleQueue function called');
+    console.log('Current state:', { queueStatus, isGameInProgress, gameState, isPenalized });
     
-    // Clear existing game state
-    setInGame(false);
-    setIsGameInProgress(false);
-    setMatch(null);
-    localStorage.removeItem('gameState');
-
-    await checkPenaltyStatus();
-
     if (isPenalized) {
+      console.log('User is penalized, cannot join queue');
       alert(`You are currently penalized and cannot join games until ${penaltyEndTime?.toLocaleString()}`);
       return;
     }
 
     if (queueStatus === 'idle') {
+      console.log('Attempting to join queue');
+      setQueueStatus('queuing');
+      
+      // Force a re-render
+      await new Promise(resolve => setTimeout(resolve, 0));
+      
+      console.log('Updated state after setting to queuing:', { queueStatus: 'queuing', isGameInProgress: false, gameState: 'idle' });
+
       try {
         const token = localStorage.getItem('token');
-        console.log('Attempting to join queue with token:', token ? 'Token exists' : 'No token');
+        console.log('Sending request to join queue');
         const response = await axios.post(`${API_BASE_URL}/api/queue/join`, 
           { gameMode },
           { headers: { Authorization: `Bearer ${token}` } }
@@ -264,20 +266,13 @@ export default function MainScreen() {
             setInGame(true);
             setLobbyTime(0);
           }, 3000);
-        } else {
-          setQueueStatus('queuing');
         }
       } catch (error) {
-        console.error('Detailed error in joining queue:', error);
-        if (axios.isAxiosError(error)) {
-          console.error('Axios error details:', error.response?.data);
-          alert(`Failed to join queue: ${error.response?.data?.error || 'Unknown error'}. Please try again.`);
-        } else {
-          alert('An unexpected error occurred. Please try again.');
-        }
+        console.error('Error joining queue:', error);
         setQueueStatus('idle');
       }
     } else if (queueStatus === 'queuing') {
+      console.log('Attempting to leave queue');
       try {
         const token = localStorage.getItem('token');
         await axios.post(`${API_BASE_URL}/api/queue/leave`, 
@@ -1275,4 +1270,3 @@ export default function MainScreen() {
     </GameStateProvider>
   )
 }
-
