@@ -46,7 +46,7 @@ interface Friend {
 }
 
 interface MatchPlayer {
-  userId: string;
+  id: string;
   name: string;
   position: string;
   secondaryPosition: string;
@@ -254,16 +254,37 @@ export default function MainScreen() {
         console.log('Queue join response:', response.data);
         
         if (response.data.match) {
-          // Handle immediate match
           console.log('Immediate match found:', response.data.match);
           setQueueStatus('matched');
-          setMatch(response.data.match);
+          // Update this part to ensure the match object has the correct structure
+          const formattedMatch: Match = {
+            id: response.data.match.gameId,
+            team1: response.data.match.team1.map((player: any) => ({
+              id: player.id,
+              name: player.name,
+              position: player.position,
+              secondaryPosition: player.secondaryPosition,
+              assignedPosition: player.assignedPosition,
+              team: 'blue',
+              profilePicture: player.profilePicture
+            })),
+            team2: response.data.match.team2.map((player: any) => ({
+              id: player.id,
+              name: player.name,
+              position: player.position,
+              secondaryPosition: player.secondaryPosition,
+              assignedPosition: player.assignedPosition,
+              team: 'red',
+              profilePicture: player.profilePicture
+            }))
+          };
+          setMatch(formattedMatch);
           setGameState('loading');
           setIsGameInProgress(true);
           
           const gameStateToSave = {
             gameState: 'lobby',
-            match: response.data.match,
+            match: formattedMatch,
             mode: gameMode,
             lobbyTime: 0,
             gameEnded: false,
@@ -535,11 +556,11 @@ export default function MainScreen() {
           location: 'Sample Stadium',
           endTime: new Date().toISOString(),
           players: [
-            { id: 'player1', name: 'John Doe', profilePicture: null },
-            { id: 'player2', name: 'Jane Smith', profilePicture: null },
-            { id: 'player3', name: 'Bob Johnson', profilePicture: null },
-            { id: 'player4', name: 'Alice Brown', profilePicture: null },
-            { id: 'player5', name: 'Charlie Davis', profilePicture: null },
+            { id: 'player1', name: 'John Doe', profilePicture: undefined },
+            { id: 'player2', name: 'Jane Smith', profilePicture: undefined },
+            { id: 'player3', name: 'Bob Johnson', profilePicture: undefined },
+            { id: 'player4', name: 'Alice Brown', profilePicture: undefined },
+            { id: 'player5', name: 'Charlie Davis', profilePicture: undefined },
           ],
           distance: 5,
           mmrChange: 10,
@@ -582,8 +603,8 @@ export default function MainScreen() {
             location: 'Nearby Field',
             endTime: new Date().toISOString(),
             players: [
-              { id: 'player1', name: 'Alex Johnson', profilePicture: null },
-              { id: 'player2', name: 'Sam Wilson', profilePicture: null },
+              { id: 'player1', name: 'Alex Johnson', profilePicture: undefined },
+              { id: 'player2', name: 'Sam Wilson', profilePicture: undefined },
               // ... add more sample players as needed
             ],
             distance: 3,

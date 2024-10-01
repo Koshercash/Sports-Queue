@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { InteractableProfilePicture } from './InteractableProfilePicture';
 import { Button } from './ui/button';
 import Image from 'next/image';
+import { API_BASE_URL } from '../config/api';
 
 interface UserProfileProps {
   id: string;
@@ -53,13 +54,19 @@ export function UserProfile({
     setIsEditing(false);
   };
 
+  const getProfilePictureUrl = (profilePicture: string | null): string => {
+    if (!profilePicture) return '/default-avatar.jpg';
+    if (profilePicture.startsWith('http')) return profilePicture;
+    return `${API_BASE_URL}${profilePicture}`;
+  };
+
   return (
     <div className="flex flex-col space-y-6">
       <div className="flex flex-col md:flex-row items-start space-y-4 md:space-y-0 md:space-x-6">
         <div className="flex-shrink-0 w-40 h-40 relative">
           {isEditable && onProfilePictureChange ? (
             <InteractableProfilePicture
-              currentImage={profilePicture || '/default-avatar.jpg'}
+              currentImage={getProfilePictureUrl(profilePicture)}
               onImageChange={onProfilePictureChange}
               size="large"
             />

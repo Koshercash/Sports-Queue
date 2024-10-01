@@ -20,7 +20,7 @@ import { UserContext } from '../../contexts/UserContext';
 // For now, let's create placeholder versions:
 
 interface MatchPlayer {
-  userId: string;
+  id: string;
   name: string;
   position: string;
   secondaryPosition: string;
@@ -118,7 +118,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
   const handleSendMessage = () => {
     if (newMessage.trim()) {
-      const currentPlayer = players.find(p => p.userId === currentUserId);
+      const currentPlayer = players.find(p => p.id === currentUserId);
       setChatMessages([...chatMessages, { 
         sender: currentPlayer?.name || 'You', 
         message: newMessage.trim(), 
@@ -129,20 +129,33 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   };
 
   const handlePlayerClick = async (playerId: string) => {
-    console.log('Clicked player ID:', playerId);
-    if (!playerId) {
-      console.error('Invalid player ID');
+    console.log('handlePlayerClick called with playerId:', playerId);
+    console.log('Current match state:', match);
+    
+    if (!playerId || typeof playerId !== 'string') {
+      console.error('Invalid player ID:', playerId);
       return;
     }
+
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No token found in localStorage');
+        return;
+      }
+
+      console.log('Sending request to:', `${API_BASE_URL}/api/user/${playerId}`);
       const response = await axios.get<UserProfileData>(`${API_BASE_URL}/api/user/${playerId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      
       console.log('Profile data received:', response.data);
       setSelectedProfile(response.data);
     } catch (error) {
       console.error('Failed to fetch user profile:', error);
+      if (axios.isAxiosError(error)) {
+        console.error('Axios error details:', error.response?.data);
+      }
       alert('Failed to load user profile. Please try again.');
     }
   };
@@ -194,7 +207,10 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   const getProfilePictureUrl = (profilePicture: string | null | undefined): string => {
     if (!profilePicture) return '/default-avatar.jpg';
     if (profilePicture.startsWith('http')) return profilePicture;
-    return `${API_BASE_URL}${profilePicture}`;
+    // Use the full URL for backend-served images
+    const url = `${API_BASE_URL}${profilePicture}`;
+    console.log('Generated profile picture URL:', url);
+    return url;
   };
 
   const positionOrder = ['goalkeeper', 'defender', 'midfielder', 'striker'];
@@ -259,7 +275,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
         mode: gameMode,
         blueScore: gameState.blueScore,
         redScore: gameState.redScore,
-        players: players.map(p => p.userId),
+        players: players.map(p => p.id),
         endTime: new Date().toISOString(),
         location: fieldLocation.name,
       };
@@ -356,13 +372,12 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       const allPlayers = [...match.team1, ...match.team2];
       console.log('All players:', allPlayers);
       console.log('User ID to match:', user.id || user.userId);
-      let foundPlayer = allPlayers.find(p => p.userId === (user.id || user.userId));
+      let foundPlayer = allPlayers.find(p => p.id === (user.id || user.userId));
       
       if (foundPlayer) {
-        // Use the team and position from the match data
         foundPlayer = {
           ...foundPlayer,
-          team: foundPlayer.team, // Use the team from match data
+          team: foundPlayer.team,
           position: foundPlayer.position === 'non-goalkeeper' && gameMode === '5v5' 
             ? user.position 
             : foundPlayer.position,
@@ -370,15 +385,13 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
         };
       } else {
         console.log('User not found in match. This should not happen.');
-        // If this happens, it's an error condition and should be handled appropriately
-        // For now, we'll assign a default, but this should be investigated
         foundPlayer = {
-          userId: user.id || user.userId,
+          id: user.id || user.userId,
           name: user.name,
           position: user.position || 'Not specified',
           secondaryPosition: user.secondaryPosition || 'Not specified',
           assignedPosition: 'primary',
-          team: 'blue', // Default to blue, but this is not ideal
+          team: 'blue',
           profilePicture: user.profilePicture
         };
       }
@@ -660,15 +673,22 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
                         {match && match.team1.map((player, index) => (
-                          <li key={`blue-${player.userId}-${index}`} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player.userId)}>
+                          <li 
+                            key={`blue-${player.id}-${index}`} 
+                            className="flex items-center space-x-2 cursor-pointer" 
+                            onClick={() => handlePlayerClick(player.id)}
+                          >
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
-                                <Image
+                                <img
                                   src={getProfilePictureUrl(player.profilePicture)}
                                   alt={player.name}
-                                  width={40}
-                                  height={40}
                                   className="object-cover w-full h-full"
+                                  onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    target.onerror = null;
+                                    target.src = '/default-avatar.jpg';
+                                  }}
                                 />
                               ) : (
                                 <User className="text-gray-400" size={24} />
@@ -676,7 +696,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                             </div>
                             <span className="text-blue-600">{player.name}</span>
                             <span className="text-sm text-gray-500">
-                            ({player.position})
+                              ({player.position})
                             </span>
                           </li>
                         ))}
@@ -688,15 +708,22 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
                         {match && match.team2.map((player, index) => (
-                          <li key={`red-${player.userId}-${index}`} className="flex items-center space-x-2 cursor-pointer" onClick={() => handlePlayerClick(player.userId)}>
+                          <li 
+                            key={`red-${player.id}-${index}`} 
+                            className="flex items-center space-x-2 cursor-pointer" 
+                            onClick={() => handlePlayerClick(player.id)}
+                          >
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
-                                <Image
+                                <img
                                   src={getProfilePictureUrl(player.profilePicture)}
                                   alt={player.name}
-                                  width={40}
-                                  height={40}
                                   className="object-cover w-full h-full"
+                                  onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    target.onerror = null;
+                                    target.src = '/default-avatar.jpg';
+                                  }}
                                 />
                               ) : (
                                 <User className="text-gray-400" size={24} />
@@ -704,7 +731,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                             </div>
                             <span className="text-red-600">{player.name}</span>
                             <span className="text-sm text-gray-500">
-                            ({player.position})
+                              ({player.position})
                             </span>
                           </li>
                         ))}
@@ -731,6 +758,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
               isEditable={false}
               cityTown={selectedProfile.cityTown}
               secondaryPosition={selectedProfile.secondaryPosition || ''}
+              profilePicture={getProfilePictureUrl(selectedProfile.profilePicture)}
             />
             <div className="flex justify-between mt-4">
               <Button onClick={() => setSelectedProfile(null)}>Close</Button>
