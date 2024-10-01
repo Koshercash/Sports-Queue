@@ -751,7 +751,7 @@ async function startServer() {
   });
 
 const MATCH_CHECK_INTERVAL = 5000; // Check for potential matches every 5 seconds
-const MAX_MMR_DIFFERENCE = 800;
+const MAX_MMR_DIFFERENCE = 400;
 const PREFERRED_MMR_RANGE = 200;
 
 const POSITIONS_5V5 = ['goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper'];
@@ -813,7 +813,7 @@ function notifyMatchedPlayers(matchedPlayers, matchDetails) {
 }
 async function tryCreateMatch(gameMode, modeField, playerCount, requiredPositions) {
   console.log(`Attempting to create match for ${gameMode}`);
-  const match = [];
+  let matchPlayers = [];
   let currentMMRRange = PREFERRED_MMR_RANGE;
 
   const queuedPlayers = await Queue.find({ gameMode }).populate('userId');
@@ -825,62 +825,125 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     return null;
   }
 
-  // Assign the first real player to the blue team
-  const firstRealPlayer = realPlayersInQueue[Math.floor(Math.random() * realPlayersInQueue.length)];
-  const suitablePosition = isPlayerSuitableForPosition(firstRealPlayer.userId, 'goalkeeper') ? 'goalkeeper' : 'non-goalkeeper';
-  match.push({ 
-    userId: firstRealPlayer.userId, 
-    position: suitablePosition,
-    team: 'blue'
-  });
-  await Queue.deleteOne({ userId: firstRealPlayer.userId._id, gameMode });
+  // Sort players by MMR
+  queuedPlayers.sort((a, b) => b.userId[modeField] - a.userId[modeField]);
 
-  let baseMMR = firstRealPlayer.userId[modeField];
+  // Calculate average MMR
+  const averageMMR = queuedPlayers.reduce((sum, player) => sum + player.userId[modeField], 0) / queuedPlayers.length;
 
-  for (let i = 1; i < requiredPositions.length; i++) {
+  let blueTeam = [];
+  let redTeam = [];
+
+  for (let i = 0; i < requiredPositions.length; i++) {
     const position = requiredPositions[i];
+    const team = i < playerCount / 2 ? blueTeam : redTeam;
     let player = null;
 
-    while (!player && currentMMRRange <= MAX_MMR_DIFFERENCE) {
-      const mmrCenter = baseMMR;
-      console.log(`Searching for ${position} with MMR range: ${mmrCenter - currentMMRRange} to ${mmrCenter + currentMMRRange}`);
+    // First, try to find a player with the required position as primary or secondary
+    player = queuedPlayers.find(qp => 
+      !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
+      (qp.userId.position === position || qp.userId.secondaryPosition === position)
+    );
 
-      const suitablePlayers = queuedPlayers.filter(qp => 
-        qp.userId &&
-        isPlayerSuitableForPosition(qp.userId, position) &&
-        qp.userId[modeField] >= mmrCenter - currentMMRRange && 
-        qp.userId[modeField] <= mmrCenter + currentMMRRange &&
-        !match.some(m => m.userId._id.equals(qp.userId._id))
+    // If no player found with the required position, find the best fit
+    if (!player) {
+      const availablePlayers = queuedPlayers.filter(qp => 
+        !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
+        (position !== 'goalkeeper' || (qp.userId.position === 'goalkeeper' || qp.userId.secondaryPosition === 'goalkeeper'))
       );
 
-      if (suitablePlayers.length > 0) {
-        player = selectBestPlayer(suitablePlayers, position);
-        console.log(`Selected player: ${player.name} (Primary: ${player.position}, Secondary: ${player.secondaryPosition}, MMR: ${player[modeField]}) for position ${position}`);
-        await Queue.deleteOne({ userId: player._id, gameMode });
-        match.push({ 
-          userId: player, 
-          position,
-          team: i < playerCount / 2 ? 'blue' : 'red'
-        });
-      } else {
-        console.log(`No suitable player found for ${position}, increasing MMR range`);
-        currentMMRRange += 100;
+      if (availablePlayers.length > 0) {
+        // Find player closest to average MMR
+        player = availablePlayers.reduce((closest, current) => 
+          Math.abs(current.userId[modeField] - averageMMR) < Math.abs(closest.userId[modeField] - averageMMR) ? current : closest
+        );
       }
     }
 
-    if (!player) {
+    if (player) {
+      let assignedPosition;
+      if (gameMode === '5v5') {
+        assignedPosition = position === 'goalkeeper' ? 'goalkeeper' : 'non-goalkeeper';
+      } else {
+        // For 11v11, use the player's primary position if it matches, otherwise use secondary
+        assignedPosition = position;
+      }
+      
+      const playerData = { 
+        userId: player.userId, 
+        position: assignedPosition,
+        team: i < playerCount / 2 ? 'blue' : 'red'
+      };
+      team.push(playerData);
+      matchPlayers.push(playerData);
+      await Queue.deleteOne({ userId: player.userId._id, gameMode });
+    } else {
       console.log(`Couldn't find a suitable player for position: ${position}`);
-      await returnPlayersToQueue(match, gameMode);
+      await returnPlayersToQueue(matchPlayers, gameMode);
       return null;
     }
   }
 
-  if (match.length === playerCount) {
-    console.log(`Successfully created match with ${match.length} players, including at least one real player`);
+  // Check if teams are balanced
+  const getTeamMMR = (team) => team.reduce((sum, player) => sum + player.userId[modeField], 0);
+  let blueTeamMMR = getTeamMMR(blueTeam);
+  let redTeamMMR = getTeamMMR(redTeam);
+  let mmrDifference = Math.abs(blueTeamMMR - redTeamMMR);
+
+  // If MMR difference is too high, try to rebalance
+  if (mmrDifference > 800) {
+    console.log(`Initial MMR difference too high: ${mmrDifference}. Attempting to rebalance.`);
+    
+    // Sort both teams by MMR
+    blueTeam.sort((a, b) => b.userId[modeField] - a.userId[modeField]);
+    redTeam.sort((a, b) => b.userId[modeField] - a.userId[modeField]);
+
+    // Try swapping players to balance MMR
+    for (let i = 0; i < blueTeam.length; i++) {
+      for (let j = 0; j < redTeam.length; j++) {
+        if (blueTeam[i].position === redTeam[j].position) {
+          const newBlueMMR = blueTeamMMR - blueTeam[i].userId[modeField] + redTeam[j].userId[modeField];
+          const newRedMMR = redTeamMMR - redTeam[j].userId[modeField] + blueTeam[i].userId[modeField];
+          const newDifference = Math.abs(newBlueMMR - newRedMMR);
+
+          if (newDifference < mmrDifference) {
+            // Swap players
+            const temp = blueTeam[i];
+            blueTeam[i] = redTeam[j];
+            redTeam[j] = temp;
+            blueTeam[i].team = 'blue';
+            redTeam[j].team = 'red';
+            blueTeamMMR = newBlueMMR;
+            redTeamMMR = newRedMMR;
+            mmrDifference = newDifference;
+
+            if (mmrDifference <= 800) {
+              console.log(`Teams rebalanced. New MMR difference: ${mmrDifference}`);
+              break;
+            }
+          }
+        }
+      }
+      if (mmrDifference <= 800) break;
+    }
+  }
+
+  // If still unbalanced, abort match creation
+  if (mmrDifference > 800) {
+    console.log(`Failed to balance teams. Final MMR difference: ${mmrDifference}`);
+    await returnPlayersToQueue(matchPlayers, gameMode);
+    return null;
+  }
+
+  console.log(`Match created with balanced teams. MMR difference: ${mmrDifference}`);
+  matchPlayers = [...blueTeam, ...redTeam];
+
+  if (matchPlayers.length === playerCount) {
+    console.log(`Successfully created match with ${matchPlayers.length} players, including at least one real player`);
 
     try {
       const newGame = new Game({
-        players: match.map(p => p.userId._id),
+        players: matchPlayers.map(p => p.userId._id),
         gameMode,
         status: 'lobby',
         startTime: new Date()
@@ -890,8 +953,8 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
 
       const matchResult = {
         gameId: newGame._id,
-        team1: formatTeamData(match.filter(p => p.team === 'blue'), modeField),
-        team2: formatTeamData(match.filter(p => p.team === 'red'), modeField)
+        team1: formatTeamData(blueTeam, modeField),
+        team2: formatTeamData(redTeam, modeField)
       };
 
       notifyMatchedPlayers(matchResult.team1.concat(matchResult.team2), matchResult);
@@ -903,8 +966,8 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     }
   }
 
-  console.log(`Match creation failed. Players found: ${match.length}`);
-  await returnPlayersToQueue(match, gameMode);
+  console.log(`Match creation failed. Players found: ${matchPlayers.length}`);
+  await returnPlayersToQueue(matchPlayers, gameMode);
   return null;
 }
 
