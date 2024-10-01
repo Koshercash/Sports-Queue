@@ -839,16 +839,20 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     const team = i < playerCount / 2 ? blueTeam : redTeam;
     let player = null;
 
-    // First, try to find a player with the required position as primary or secondary
-    player = queuedPlayers.find(qp => 
+    // Find players within an acceptable MMR range
+    const acceptablePlayers = queuedPlayers.filter(qp => 
       !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
+      Math.abs(qp.userId[modeField] - averageMMR) <= MAX_MMR_DIFFERENCE
+    );
+
+    // First, try to find a player with the required position as primary or secondary
+    player = acceptablePlayers.find(qp => 
       (qp.userId.position === position || qp.userId.secondaryPosition === position)
     );
 
     // If no player found with the required position, find the best fit
     if (!player) {
-      const availablePlayers = queuedPlayers.filter(qp => 
-        !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
+      const availablePlayers = acceptablePlayers.filter(qp => 
         (position !== 'goalkeeper' || (qp.userId.position === 'goalkeeper' || qp.userId.secondaryPosition === 'goalkeeper'))
       );
 
@@ -891,7 +895,7 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
   let mmrDifference = Math.abs(blueTeamMMR - redTeamMMR);
 
   // If MMR difference is too high, try to rebalance
-  if (mmrDifference > 800) {
+  if (mmrDifference > 200) {
     console.log(`Initial MMR difference too high: ${mmrDifference}. Attempting to rebalance.`);
     
     // Sort both teams by MMR
@@ -917,19 +921,19 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
             redTeamMMR = newRedMMR;
             mmrDifference = newDifference;
 
-            if (mmrDifference <= 800) {
+            if (mmrDifference <= 200) {
               console.log(`Teams rebalanced. New MMR difference: ${mmrDifference}`);
               break;
             }
           }
         }
       }
-      if (mmrDifference <= 800) break;
+      if (mmrDifference <= 200) break;
     }
   }
 
   // If still unbalanced, abort match creation
-  if (mmrDifference > 800) {
+  if (mmrDifference > 200) {
     console.log(`Failed to balance teams. Final MMR difference: ${mmrDifference}`);
     await returnPlayersToQueue(matchPlayers, gameMode);
     return null;
