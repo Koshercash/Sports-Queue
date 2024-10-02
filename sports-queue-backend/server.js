@@ -133,7 +133,31 @@ async function startServer() {
   // Create indexes after models are defined
   await Queue.collection.createIndex({ gameMode: 1, 'userId.position': 1, 'userId.secondaryPosition': 1, 'userId.mmr5v5': 1, 'userId.mmr11v11': 1, joinedAt: 1 });
 
+  // Add this new function to check if a player has been reported too many times
+  async function checkReportThreshold(reportingUserId) {
+    const recentReports = await Report.countDocuments({
+      reportingUser: reportingUserId,
+      timestamp: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } // Last 7 days
+    });
+    return recentReports >= 10; // Threshold of 10 reports per week
+  }
+
+  // Modify the handleReport function
   async function handleReport(reportedUserId, reportingUserId, gameId, reason) {
+    // Check if the reporting user has exceeded the report threshold
+    const hasExceededThreshold = await checkReportThreshold(reportingUserId);
+  
+    // Check if this player has already been reported by the reporting user for this game
+    const existingReport = await Report.findOne({
+      reportedUser: reportedUserId,
+      reportingUser: reportingUserId,
+      game: gameId
+    });
+  
+    if (existingReport) {
+      throw new Error('You have already reported this player for this game');
+    }
+  
     // Validate reportedUserId and gameId
     const reportedUser = await User.findById(reportedUserId);
     const game = await Game.findById(gameId);
@@ -146,21 +170,30 @@ async function startServer() {
       reportedUser: reportedUserId,
       reportingUser: reportingUserId,
       game: gameId,
-      reason
+      reason,
+      weight: hasExceededThreshold ? 0.5 : 1 // Reduce weight if threshold exceeded
     });
     await newReport.save();
   
-    const reportsCount = await Report.countDocuments({
-      reportedUser: reportedUserId,
-      game: gameId
-    });
+    const reportsCount = await Report.aggregate([
+      { $match: { reportedUser: mongoose.Types.ObjectId(reportedUserId), game: mongoose.Types.ObjectId(gameId) } },
+      { $group: { _id: "$reason", totalWeight: { $sum: "$weight" } } }
+    ]);
   
-    if (reportsCount >= 3 || (reason === 'physical_fight' && reportsCount >= 6)) {
-      await progressBanStage(reportedUserId, reason === 'physical_fight');
-      console.log(`User ${reportedUserId} ban stage progressed due to ${reportsCount} reports in game ${gameId}`);
+    const physicalFightReports = reportsCount.find(r => r._id === 'physical_fight');
+    const physicalFightWeight = physicalFightReports ? physicalFightReports.totalWeight : 0;
+  
+    if (physicalFightWeight >= 6) {
+      await progressBanStage(reportedUserId, true); // Permanent ban for 6+ physical fight reports
+      console.log(`User ${reportedUserId} permanently banned due to ${physicalFightWeight} physical fight reports in game ${gameId}`);
+    } else {
+      const totalWeight = reportsCount.reduce((sum, report) => sum + report.totalWeight, 0);
+      if (totalWeight >= 3) {
+        await progressBanStage(reportedUserId, false);
+        console.log(`User ${reportedUserId} ban stage progressed due to ${totalWeight} weighted reports in game ${gameId}`);
+      }
     }
   }
-
   async function createAdminUser() {
     const adminEmail = process.env.ADMIN_EMAIL || 'Reuven5771@gmail.com';
     const adminPassword = process.env.ADMIN_PASSWORD || 'Remember4';
@@ -429,7 +462,7 @@ async function startServer() {
       res.status(200).json({ message: 'Report submitted successfully' });
     } catch (error) {
       console.error('Error submitting report:', error);
-      res.status(500).json({ error: 'Failed to submit report', details: error.message });
+      res.status(400).json({ error: error.message });
     }
   });
 

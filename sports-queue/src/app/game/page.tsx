@@ -182,25 +182,38 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   };
 
   const confirmReportPlayer = async () => {
-    if (reportedPlayer && reportReason) {
+    if (reportedPlayer && reportReason && match) {
       try {
         const token = localStorage.getItem('token');
-        await axios.post(`${API_BASE_URL}/api/report-player`, 
+        const response = await axios.post(`${API_BASE_URL}/api/report`, 
           { 
-            reportedPlayerId: reportedPlayer,
+            reportedUserId: reportedPlayer,
+            gameId: match.id,
             reason: reportReason
           },
           { headers: { Authorization: `Bearer ${token}` } }
         );
+        console.log('Report response:', response.data);
         alert('Player reported successfully');
+        setReportedPlayer(null);
+        setReportReason(null);
       } catch (error) {
         console.error('Failed to report player:', error);
-        alert('Failed to report player. Please try again.');
+        if (axios.isAxiosError(error)) {
+          console.error('Error response:', error.response?.data);
+          alert(`Failed to report player: ${error.response?.data?.error || 'Unknown error'}`);
+        } else {
+          alert('Failed to report player. Please try again.');
+        }
       }
-      setReportedPlayer(null);
-      setReportReason(null);
     } else {
-      alert('Please select a reason for reporting.');
+      if (!reportedPlayer) {
+        alert('No player selected for reporting.');
+      } else if (!reportReason) {
+        alert('Please select a reason for reporting.');
+      } else if (!match) {
+        alert('No active match found.');
+      }
     }
   };
 
@@ -400,6 +413,12 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       setUserPlayer(foundPlayer);
     }
   }, [match, user, gameMode]);
+
+  useEffect(() => {
+    if (match && !match.id) {
+      console.error('Match object does not have an id:', match);
+    }
+  }, [match]);
 
   const handleBackClick = () => {
     console.log('Back button clicked');
