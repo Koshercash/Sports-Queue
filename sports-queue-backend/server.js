@@ -453,16 +453,48 @@ async function startServer() {
     try {
       const { reportedUserId, gameId, reason } = req.body;
       
+      console.log('Received report data:', { reportedUserId, gameId, reason, reportingUserId: req.userId });
+      
       // Validate input
-      if (!reportedUserId || !gameId || !reason) {
-        return res.status(400).json({ error: 'Missing required fields' });
+      if (!reportedUserId) {
+        console.error('Missing reportedUserId');
+        return res.status(400).json({ error: 'Missing reportedUserId' });
+      }
+      if (!gameId) {
+        console.error('Missing gameId');
+        return res.status(400).json({ error: 'Missing gameId' });
+      }
+      if (!reason) {
+        console.error('Missing reason');
+        return res.status(400).json({ error: 'Missing reason' });
       }
   
+      // Check if the reported user exists
+      const reportedUser = await User.findById(reportedUserId);
+      if (!reportedUser) {
+        console.error(`Reported user not found: ${reportedUserId}`);
+        return res.status(404).json({ error: 'Reported user not found' });
+      }
+  
+      // Check if the game exists
+      console.log('Searching for game with ID:', gameId);
+      const game = await Game.findById(gameId);
+      if (!game) {
+        console.error(`Game not found: ${gameId}`);
+        // Log all games in the database for debugging
+        const allGames = await Game.find({}).select('_id gameMode status startTime');
+        console.log('All games in database:', allGames);
+        return res.status(404).json({ error: 'Game not found' });
+      }
+  
+      console.log('Game found:', game);
+  
       await handleReport(reportedUserId, req.userId, gameId, reason);
+      console.log('Report submitted successfully');
       res.status(200).json({ message: 'Report submitted successfully' });
     } catch (error) {
       console.error('Error submitting report:', error);
-      res.status(400).json({ error: error.message });
+      res.status(500).json({ error: 'Failed to submit report', details: error.message });
     }
   });
 

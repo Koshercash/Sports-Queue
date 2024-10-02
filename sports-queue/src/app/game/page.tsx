@@ -31,6 +31,7 @@ interface MatchPlayer {
 
 interface Match {
   id: string;
+  gameId: string; // Add this line
   team1: MatchPlayer[];
   team2: MatchPlayer[];
 }
@@ -73,6 +74,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   const [reportReason, setReportReason] = useState<string | null>(null);
   const [lobbyTime, setLobbyTime] = useState(0);
   const [userPlayer, setUserPlayer] = useState<MatchPlayer | null>(null);
+  const [gameId, setGameId] = useState<string | null>(null);
 
   const players = match ? [...match.team1, ...match.team2] : [];
 
@@ -177,18 +179,30 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   };
 
   const handleReportPlayer = (playerId: string) => {
+    if (!gameId && (!match || !match.id)) {
+      console.error('No game ID found when attempting to report player:', { gameId, match });
+      alert('Unable to report player at this time. No active game found.');
+      return;
+    }
     setReportedPlayer(playerId);
     setReportReason(null);
   };
 
   const confirmReportPlayer = async () => {
+    console.log('Confirming report with:', { reportedPlayer, reportReason, gameId, match });
     if (reportedPlayer && reportReason && match) {
       try {
         const token = localStorage.getItem('token');
+        const actualGameId = match.id || match.gameId; // Use match.id as fallback
+        console.log('Sending report with data:', { 
+          reportedUserId: reportedPlayer, 
+          gameId: actualGameId, 
+          reason: reportReason 
+        });
         const response = await axios.post(`${API_BASE_URL}/api/report`, 
           { 
             reportedUserId: reportedPlayer,
-            gameId: match.id,
+            gameId: actualGameId,
             reason: reportReason
           },
           { headers: { Authorization: `Bearer ${token}` } }
@@ -211,8 +225,9 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
         alert('No player selected for reporting.');
       } else if (!reportReason) {
         alert('Please select a reason for reporting.');
-      } else if (!match) {
-        alert('No active match found.');
+      } else if (!match || (!match.id && !match.gameId)) {
+        console.error('No game ID found:', { match });
+        alert('No active game ID found. Please try rejoining the game.');
       }
     }
   };
@@ -419,6 +434,18 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       console.error('Match object does not have an id:', match);
     }
   }, [match]);
+
+  useEffect(() => {
+    if (initialMatch && (initialMatch.id || initialMatch.gameId)) {
+      setGameId(initialMatch.id || initialMatch.gameId);
+      console.log('Set gameId from initialMatch:', initialMatch.id || initialMatch.gameId);
+    } else if (gameState && gameState.matchId) {
+      setGameId(gameState.matchId);
+      console.log('Set gameId from gameState:', gameState.matchId);
+    } else {
+      console.error('No game ID found in initialMatch or gameState');
+    }
+  }, [initialMatch, gameState]);
 
   const handleBackClick = () => {
     console.log('Back button clicked');

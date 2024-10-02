@@ -57,6 +57,7 @@ interface MatchPlayer {
 
 interface Match {
   id: string;
+  gameId: string; // Add this line
   team1: MatchPlayer[];
   team2: MatchPlayer[];
 }
@@ -259,6 +260,7 @@ export default function MainScreen() {
           // Update this part to ensure the match object has the correct structure
           const formattedMatch: Match = {
             id: response.data.match.gameId,
+            gameId: response.data.match.gameId, // Add this line
             team1: response.data.match.team1.map((player: any) => ({
               id: player.id,
               name: player.name,
