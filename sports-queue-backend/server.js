@@ -880,8 +880,12 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     }
     return false;
   };
+  
+  const positions = gameMode === '5v5' ? 
+  ['goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper'] :
+  ['goalkeeper', 'fullback', 'fullback', 'centerback', 'centerback', 'winger', 'winger', 'midfielder', 'midfielder', 'midfielder', 'striker'];
 
-  const positions = ['goalkeeper', 'fullback', 'fullback', 'centerback', 'centerback', 'winger', 'winger', 'midfielder', 'midfielder', 'midfielder', 'striker'];
+  // Fill both teams
   for (const position of positions) {
     if (!findPlayerForPosition(position, 'blue') || !findPlayerForPosition(position, 'red')) {
       console.log(`Couldn't find suitable players for position: ${position}`);
