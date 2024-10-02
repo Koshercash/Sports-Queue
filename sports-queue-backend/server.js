@@ -814,7 +814,7 @@ function notifyMatchedPlayers(matchedPlayers, matchDetails) {
 async function tryCreateMatch(gameMode, modeField, playerCount, requiredPositions) {
   console.log(`Attempting to create match for ${gameMode}`);
   let matchPlayers = [];
-  let currentMMRRange = PREFERRED_MMR_RANGE;
+  let maxMMRDifference = 400;
 
   const queuedPlayers = await Queue.find({ gameMode }).populate('userId');
   console.log(`Found ${queuedPlayers.length} total players in queue for ${gameMode}`);
@@ -828,46 +828,49 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
   // Sort players by MMR
   queuedPlayers.sort((a, b) => b.userId[modeField] - a.userId[modeField]);
 
-  // Calculate average MMR
-  const averageMMR = queuedPlayers.reduce((sum, player) => sum + player.userId[modeField], 0) / queuedPlayers.length;
+  // Check if any player has been in queue for more than 5 minutes
+  const oldestQueueTime = Math.min(...queuedPlayers.map(qp => new Date() - qp.joinedAt));
+  if (oldestQueueTime > 5 * 60 * 1000) { // 5 minutes in milliseconds
+    maxMMRDifference = Math.min(800, 400 + Math.floor((oldestQueueTime - 5 * 60 * 1000) / (60 * 1000)) * 40);
+    console.log(`Increased max MMR difference to ${maxMMRDifference} due to long queue time`);
+  }
 
   let blueTeam = [];
   let redTeam = [];
+  let lowestMMR = Infinity;
+  let highestMMR = -Infinity;
 
   for (let i = 0; i < requiredPositions.length; i++) {
     const position = requiredPositions[i];
     const team = i < playerCount / 2 ? blueTeam : redTeam;
     let player = null;
 
-    // First, try to find a player with the required position as primary or secondary
-    player = queuedPlayers.find(qp => 
-      !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
-      (qp.userId.position === position || qp.userId.secondaryPosition === position)
-    );
-
-    // If no player found with the required position, find the best fit
-    if (!player) {
-      const availablePlayers = queuedPlayers.filter(qp => 
-        !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
-        (position !== 'goalkeeper' || (qp.userId.position === 'goalkeeper' || qp.userId.secondaryPosition === 'goalkeeper'))
-      );
-
-      if (availablePlayers.length > 0) {
-        // Find player closest to average MMR
-        player = availablePlayers.reduce((closest, current) => 
-          Math.abs(current.userId[modeField] - averageMMR) < Math.abs(closest.userId[modeField] - averageMMR) ? current : closest
-        );
+    // Find a suitable player within the MMR range
+    for (const qp of queuedPlayers) {
+      if (!matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
+          (qp.userId.position === position || qp.userId.secondaryPosition === position) &&
+          (matchPlayers.length === 0 || 
+           (qp.userId[modeField] >= lowestMMR - maxMMRDifference && 
+            qp.userId[modeField] <= highestMMR + maxMMRDifference))) {
+        player = qp;
+        break;
       }
     }
 
+    // If no player found with the required position, find the best fit within MMR range
+    if (!player) {
+      player = queuedPlayers.find(qp => 
+        !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
+        (position !== 'goalkeeper' || (qp.userId.position === 'goalkeeper' || qp.userId.secondaryPosition === 'goalkeeper')) &&
+        (matchPlayers.length === 0 || 
+         (qp.userId[modeField] >= lowestMMR - maxMMRDifference && 
+          qp.userId[modeField] <= highestMMR + maxMMRDifference))
+      );
+    }
+
     if (player) {
-      let assignedPosition;
-      if (gameMode === '5v5') {
-        assignedPosition = position === 'goalkeeper' ? 'goalkeeper' : 'non-goalkeeper';
-      } else {
-        // For 11v11, use the player's primary position if it matches, otherwise use secondary
-        assignedPosition = position;
-      }
+      let assignedPosition = position === 'goalkeeper' ? 'goalkeeper' : 
+        (gameMode === '5v5' ? 'non-goalkeeper' : position);
       
       const playerData = { 
         userId: player.userId, 
@@ -877,6 +880,10 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
       team.push(playerData);
       matchPlayers.push(playerData);
       await Queue.deleteOne({ userId: player.userId._id, gameMode });
+
+      // Update MMR range
+      lowestMMR = Math.min(lowestMMR, player.userId[modeField]);
+      highestMMR = Math.max(highestMMR, player.userId[modeField]);
     } else {
       console.log(`Couldn't find a suitable player for position: ${position}`);
       await returnPlayersToQueue(matchPlayers, gameMode);
@@ -884,58 +891,97 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     }
   }
 
-  // Check if teams are balanced
-  const getTeamMMR = (team) => team.reduce((sum, player) => sum + player.userId[modeField], 0);
-  let blueTeamMMR = getTeamMMR(blueTeam);
-  let redTeamMMR = getTeamMMR(redTeam);
-  let mmrDifference = Math.abs(blueTeamMMR - redTeamMMR);
+  
+  function swapPlayers(teamA, teamB, indexA, indexB) {
+    const tempPlayer = teamA[indexA];
+    teamA[indexA] = teamB[indexB];
+    teamB[indexB] = tempPlayer;
+    teamA[indexA].team = 'blue';
+    teamB[indexB].team = 'red';
+  }
 
-  // If MMR difference is too high, try to rebalance
-  if (mmrDifference > 800) {
-    console.log(`Initial MMR difference too high: ${mmrDifference}. Attempting to rebalance.`);
-    
-    // Sort both teams by MMR
-    blueTeam.sort((a, b) => b.userId[modeField] - a.userId[modeField]);
-    redTeam.sort((a, b) => b.userId[modeField] - a.userId[modeField]);
+  function calculateTeamStrength(team) {
+    return team.reduce((sum, player) => sum + player.userId[modeField], 0);
+  }
 
-    // Try swapping players to balance MMR
-    for (let i = 0; i < blueTeam.length; i++) {
-      for (let j = 0; j < redTeam.length; j++) {
-        if (blueTeam[i].position === redTeam[j].position) {
-          const newBlueMMR = blueTeamMMR - blueTeam[i].userId[modeField] + redTeam[j].userId[modeField];
-          const newRedMMR = redTeamMMR - redTeam[j].userId[modeField] + blueTeam[i].userId[modeField];
-          const newDifference = Math.abs(newBlueMMR - newRedMMR);
+  function balanceTeams() {
+    const highMMRThreshold = 900; // Adjust this threshold as needed
+    let blueHighMMRCount = blueTeam.filter(p => p.userId[modeField] >= highMMRThreshold).length;
+    let redHighMMRCount = redTeam.filter(p => p.userId[modeField] >= highMMRThreshold).length;
 
-          if (newDifference < mmrDifference) {
-            // Swap players
-            const temp = blueTeam[i];
-            blueTeam[i] = redTeam[j];
-            redTeam[j] = temp;
-            blueTeam[i].team = 'blue';
-            redTeam[j].team = 'red';
-            blueTeamMMR = newBlueMMR;
-            redTeamMMR = newRedMMR;
-            mmrDifference = newDifference;
+    while (Math.abs(blueHighMMRCount - redHighMMRCount) > 1) {
+      const sourceTeam = blueHighMMRCount > redHighMMRCount ? blueTeam : redTeam;
+      const targetTeam = blueHighMMRCount > redHighMMRCount ? redTeam : blueTeam;
 
-            if (mmrDifference <= 800) {
-              console.log(`Teams rebalanced. New MMR difference: ${mmrDifference}`);
-              break;
+      const highMMRPlayer = sourceTeam.find(p => p.userId[modeField] >= highMMRThreshold);
+      const lowMMRPlayer = targetTeam.find(p => p.userId[modeField] < highMMRThreshold);
+
+      if (highMMRPlayer && lowMMRPlayer) {
+        const sourceIndex = sourceTeam.indexOf(highMMRPlayer);
+        const targetIndex = targetTeam.indexOf(lowMMRPlayer);
+
+        if (highMMRPlayer.position === lowMMRPlayer.position || 
+            (highMMRPlayer.position !== 'goalkeeper' && lowMMRPlayer.position !== 'goalkeeper')) {
+          swapPlayers(sourceTeam, targetTeam, sourceIndex, targetIndex);
+          blueHighMMRCount = blueTeam.filter(p => p.userId[modeField] >= highMMRThreshold).length;
+          redHighMMRCount = redTeam.filter(p => p.userId[modeField] >= highMMRThreshold).length;
+        }
+      } else {
+        break; // No suitable players to swap
+      }
+    }
+
+    // Fine-tune balance
+    const maxIterations = 100;
+    let iterations = 0;
+    while (iterations < maxIterations) {
+      const blueStrength = calculateTeamStrength(blueTeam);
+      const redStrength = calculateTeamStrength(redTeam);
+      if (Math.abs(blueStrength - redStrength) < 100) break; // Teams are balanced enough
+
+      const sourceTeam = blueStrength > redStrength ? blueTeam : redTeam;
+      const targetTeam = blueStrength > redStrength ? redTeam : blueTeam;
+
+      let bestSwap = null;
+      let bestDifference = Math.abs(blueStrength - redStrength);
+
+      for (let i = 0; i < sourceTeam.length; i++) {
+        for (let j = 0; j < targetTeam.length; j++) {
+          if (sourceTeam[i].position === targetTeam[j].position || 
+              (sourceTeam[i].position !== 'goalkeeper' && targetTeam[j].position !== 'goalkeeper')) {
+            swapPlayers(sourceTeam, targetTeam, i, j);
+            const newBlueDifference = calculateTeamStrength(blueTeam);
+            const newRedDifference = calculateTeamStrength(redTeam);
+            const newDifference = Math.abs(newBlueDifference - newRedDifference);
+
+            if (newDifference < bestDifference) {
+              bestSwap = { sourceIndex: i, targetIndex: j };
+              bestDifference = newDifference;
             }
+
+            // Revert the swap
+            swapPlayers(sourceTeam, targetTeam, i, j);
           }
         }
       }
-      if (mmrDifference <= 800) break;
+
+      if (bestSwap) {
+        swapPlayers(sourceTeam, targetTeam, bestSwap.sourceIndex, bestSwap.targetIndex);
+      } else {
+        break; // No improvement possible
+      }
+
+      iterations++;
     }
   }
 
-  // If still unbalanced, abort match creation
-  if (mmrDifference > 800) {
-    console.log(`Failed to balance teams. Final MMR difference: ${mmrDifference}`);
-    await returnPlayersToQueue(matchPlayers, gameMode);
-    return null;
-  }
+  balanceTeams();
 
-  console.log(`Match created with balanced teams. MMR difference: ${mmrDifference}`);
+  console.log('Final team compositions:');
+  console.log('Blue Team:', blueTeam.map(p => ({ position: p.position, mmr: p.userId[modeField] })));
+  console.log('Red Team:', redTeam.map(p => ({ position: p.position, mmr: p.userId[modeField] })));
+
+  // Combine balanced teams
   matchPlayers = [...blueTeam, ...redTeam];
 
   if (matchPlayers.length === playerCount) {
