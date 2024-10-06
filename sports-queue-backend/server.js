@@ -12,6 +12,9 @@ import rateLimit from 'express-rate-limit';
 import Joi from 'joi';
 import { WebSocketServer } from 'ws';
 import http from 'http';
+import axios from 'axios';
+import { DateTime } from 'luxon';
+import { getDistance, computeDestinationPoint } from 'geolib';
 
 dotenv.config();
 
@@ -33,13 +36,28 @@ app.use(cors({
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+const activeConnections = new Map();
+
 wss.on('connection', (ws) => {
   console.log('New WebSocket connection');
   
   ws.on('message', (message) => {
-    const data = JSON.parse(message);
-    if (data.type === 'auth') {
-      ws.userId = data.userId;
+    try {
+      const data = JSON.parse(message);
+      if (data.type === 'auth') {
+        ws.userId = data.userId;
+        activeConnections.set(data.userId, ws);
+        console.log(`WebSocket authenticated for user ${data.userId}`);
+      }
+    } catch (error) {
+      console.error('Error parsing WebSocket message:', error);
+    }
+  });
+
+  ws.on('close', () => {
+    if (ws.userId) {
+      activeConnections.delete(ws.userId);
+      console.log(`WebSocket connection closed for user ${ws.userId}`);
     }
   });
 });
@@ -60,7 +78,7 @@ async function startServer() {
     phone: String,
     sex: String,
     position: String,
-    secondaryPosition: String, // Add this line
+    secondaryPosition: String,
     skillLevel: String,
     mmr5v5: Number,
     mmr11v11: Number,
@@ -68,8 +86,31 @@ async function startServer() {
     dateOfBirth: Date,
     profilePicturePath: String,
     bio: { type: String, default: '' },
-    cityTown: String, // Add this line
+    cityTown: String,
+    location: {
+      type: { type: String, enum: ['Point'], required: false, default: 'Point' },
+      coordinates: { type: [Number], required: false, default: [0, 0] }
+    }
   });
+
+  // Create User model
+  const User = mongoose.model('User', UserSchema);
+
+  // Now define updateExistingUsers function
+  async function updateExistingUsers() {
+    try {
+      await User.updateMany(
+        { location: { $exists: false } },
+        { $set: { location: { type: 'Point', coordinates: [0, 0] } } }
+      );
+      console.log('Updated existing users with default location');
+    } catch (error) {
+      console.error('Error updating existing users:', error);
+    }
+  }
+
+  // Call updateExistingUsers after User model is defined
+  await updateExistingUsers();
 
   const FriendSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -82,7 +123,8 @@ async function startServer() {
     gameMode: String,
     status: { type: String, enum: ['lobby', 'inProgress', 'ended'], default: 'lobby' },
     startTime: Date,
-    endTime: Date
+    endTime: Date,
+    field: { type: mongoose.Schema.Types.ObjectId, ref: 'Field' }
   });
 
   const QueueSchema = new mongoose.Schema({
@@ -120,8 +162,33 @@ async function startServer() {
     createdAt: { type: Date, default: Date.now }
   });
 
+  const FieldSchema = new mongoose.Schema({
+    name: String,
+    location: {
+      type: { type: String, enum: ['Point'], required: true },
+      coordinates: { type: [Number], required: true }
+    },
+    size: { type: String, enum: ['5v5', '11v11', 'both'] },
+    availability: [{
+      date: Date,
+      slots: [{
+        startTime: Date,
+        endTime: Date,
+        isAvailable: Boolean
+      }]
+    }]
+  });
+
+  const ScheduledGameSchema = new mongoose.Schema({
+    field: { type: mongoose.Schema.Types.ObjectId, ref: 'Field' },
+    startTime: Date,
+    endTime: Date,
+    gameMode: String
+  });
+
+  FieldSchema.index({ location: '2dsphere' });
+
   // Create models
-  const User = mongoose.model('User', UserSchema);
   const Friend = mongoose.model('Friend', FriendSchema);
   const Game = mongoose.model('Game', GameSchema);
   const Queue = mongoose.model('Queue', QueueSchema);
@@ -129,6 +196,8 @@ async function startServer() {
   const Report = mongoose.model('Report', ReportSchema);
   const Ban = mongoose.model('Ban', BanSchema);
   const BanAppeal = mongoose.model('BanAppeal', BanAppealSchema);
+  const Field = mongoose.model('Field', FieldSchema);
+  const ScheduledGame = mongoose.model('ScheduledGame', ScheduledGameSchema);
 
   // Create indexes after models are defined
   await Queue.collection.createIndex({ gameMode: 1, 'userId.position': 1, 'userId.secondaryPosition': 1, 'userId.mmr5v5': 1, 'userId.mmr11v11': 1, joinedAt: 1 });
@@ -278,6 +347,57 @@ async function startServer() {
     return null;
   }
   
+  async function createTestFields() {
+    const existingFields = await Field.countDocuments();
+    if (existingFields === 0) {
+      const YOUR_LATITUDE = parseFloat(process.env.YOUR_LATITUDE) || 35.132320;
+      const YOUR_LONGITUDE = parseFloat(process.env.YOUR_LONGITUDE) || -118.449074;
+  
+      const testFields = [];
+      for (let i = 0; i < 20; i++) {
+        const [longitude, latitude] = getRandomLocationWithin50Miles(YOUR_LATITUDE, YOUR_LONGITUDE);
+        
+        // Create availability for the next 7 days
+        const availability = [];
+        for (let j = 0; j < 7; j++) {
+          const date = new Date();
+          date.setDate(date.getDate() + j);
+          const slots = [];
+          for (let hour = 8; hour < 22; hour++) { // 8 AM to 10 PM
+            const startTime = new Date(date);
+            startTime.setHours(hour, 0, 0, 0);
+            const endTime = new Date(startTime);
+            endTime.setHours(hour + 1, 0, 0, 0);
+            slots.push({
+              startTime,
+              endTime,
+              isAvailable: Math.random() > 0.3 // 70% chance of being available
+            });
+          }
+          availability.push({ date, slots });
+        }
+
+        testFields.push({
+          name: `Test Field ${i + 1}`,
+          size: i % 3 === 0 ? '5v5' : i % 3 === 1 ? '11v11' : 'both',
+          location: {
+            type: 'Point',
+            coordinates: [longitude, latitude]
+          },
+          availability
+        });
+      }
+  
+      await Field.insertMany(testFields);
+      console.log(`Created ${testFields.length} test fields`);
+    } else {
+      console.log(`${existingFields} fields already exist, skipping creation`);
+    }
+  }
+  
+  // Call this function after connecting to the database
+  await createTestFields();
+
   app.post('/api/register', upload.fields([
     { name: 'profilePicture', maxCount: 1 },
     { name: 'idPicture', maxCount: 1 }
@@ -330,7 +450,7 @@ async function startServer() {
         dateOfBirth: dob,
         cityTown: Array.isArray(cityTown) ? cityTown[0] : cityTown, // Ensure cityTown is a string
         profilePicturePath: req.files.profilePicture ? req.files.profilePicture[0].filename : null,
-        idPicture: req.files.idPicture ? req.files.idPicture[0].filename : null
+        idPicture: req.files.idPicture ? req.files.idPicture[0].filename : null,
       });
 
       await user.save();
@@ -402,7 +522,24 @@ async function startServer() {
       res.status(401).json({ error: 'Invalid token' });
     }
   };
-
+  app.post('/api/user/update-location', authMiddleware, async (req, res) => {
+    try {
+      const { latitude, longitude } = req.body;
+      const user = await User.findById(req.userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      user.location = {
+        type: 'Point',
+        coordinates: [parseFloat(longitude), parseFloat(latitude)]
+      };
+      await user.save();
+      res.json({ message: 'Location updated successfully' });
+    } catch (error) {
+      console.error('Error updating location:', error);
+      res.status(500).json({ error: 'Failed to update location' });
+    }
+  });
   app.get('/api/user-profile', authMiddleware, async (req, res) => {
     try {
       const user = await User.findById(req.userId).select('-password');
@@ -828,21 +965,6 @@ const POSITIONS_11V11 = [
   'midfielder', 'midfielder', 'midfielder',
   'striker'
 ];
-
-async function startMatchmakingProcess() {
-  console.log('Starting continuous matchmaking process');
-  while (true) {
-    try {
-      await logQueueState();
-      await checkForMatches('5v5');
-      await checkForMatches('11v11');
-    } catch (error) {
-      console.error('Error in matchmaking process:', error);
-    }
-    await new Promise(resolve => setTimeout(resolve, MATCH_CHECK_INTERVAL));
-  }
-}
-
 async function checkForMatches(gameMode) {
   console.log(`Checking for ${gameMode} matches`);
   const modeField = gameMode === '5v5' ? 'mmr5v5' : 'mmr11v11';
@@ -852,7 +974,6 @@ async function checkForMatches(gameMode) {
   if (gameMode === '5v5') {
     requiredPositions = POSITIONS_5V5.concat(POSITIONS_5V5);
   } else {
-    // For 11v11, create two sets of positions, one for each team
     requiredPositions = [
       ...POSITIONS_11V11.map(pos => ({ position: pos, team: 'blue' })),
       ...POSITIONS_11V11.map(pos => ({ position: pos, team: 'red' }))
@@ -866,23 +987,45 @@ async function checkForMatches(gameMode) {
     console.log(`Not enough players in ${gameMode} queue to create a match`);
     return;
   }
-
   const matchCreated = await tryCreateMatch(gameMode, modeField, playerCount, requiredPositions);
   if (matchCreated) {
     console.log(`Match created for ${gameMode}:`, matchCreated);
-    // notifyMatchedPlayers is now called inside tryCreateMatch
   } else {
     console.log(`Failed to create ${gameMode} match`);
   }
 }
-
-function notifyMatchedPlayers(matchedPlayers, matchDetails) {
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN && client.userId) {
-      const playerInMatch = matchedPlayers.find(p => p.id.toString() === client.userId);
-      if (playerInMatch) {
-        client.send(JSON.stringify({ type: 'match_found', matchDetails }));
-      }
+async function startMatchmakingProcess() {
+  console.log('Starting continuous matchmaking process');
+  while (true) {
+    try {
+      await logQueueState();
+      await checkForMatches('5v5');
+      await checkForMatches('11v11');
+    } catch (error) {
+      console.error('Error in matchmaking process:', error);
+    }
+    await new Promise(resolve => setTimeout(resolve, MATCH_CHECK_INTERVAL));
+  }
+}
+async function notifyMatchedPlayers(players, matchResult) {
+  console.log('Notifying matched players:', players.map(p => p.id));
+  
+  players.forEach(player => {
+    const ws = activeConnections.get(player.id.toString());
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'matchFound',
+        matchDetails: {
+          gameId: matchResult.gameId,
+          fieldName: matchResult.fieldName,
+          startTime: matchResult.startTime,
+          endTime: matchResult.endTime,
+          team: player.team
+        }
+      }));
+      console.log(`Notified player ${player.id} about match`);
+    } else {
+      console.log(`WebSocket not found or not open for player ${player.id}`);
     }
   });
 }
@@ -913,28 +1056,56 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
   let lowestMMR = Infinity;
   let highestMMR = -Infinity;
 
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
+    const R = 6371; // Radius of the Earth in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
   const findPlayerForPosition = (position, team) => {
     let player = queuedPlayers.find(qp => 
       !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
-      (qp.userId.position === position || qp.userId.secondaryPosition === position) &&
+      (gameMode === '5v5' ?
+        (position === 'goalkeeper' ? 
+          (qp.userId.position === 'goalkeeper' || qp.userId.secondaryPosition === 'goalkeeper') :
+          (qp.userId.position !== 'goalkeeper' && qp.userId.secondaryPosition !== 'goalkeeper')) :
+        (qp.userId.position === position || qp.userId.secondaryPosition === position)) &&
       (matchPlayers.length === 0 || 
        (qp.userId[modeField] >= lowestMMR - maxMMRDifference && 
-        qp.userId[modeField] <= highestMMR + maxMMRDifference))
+        qp.userId[modeField] <= highestMMR + maxMMRDifference)) &&
+      matchPlayers.every(mp => 
+        calculateDistance(
+          qp.userId.location?.coordinates[1], qp.userId.location?.coordinates[0],
+          mp.userId.location?.coordinates[1], mp.userId.location?.coordinates[0]
+        ) <= 80.47 // 50 miles in km
+      )
     );
-
+    
     if (!player && position !== 'goalkeeper') {
       player = queuedPlayers.find(qp => 
         !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
         (matchPlayers.length === 0 || 
          (qp.userId[modeField] >= lowestMMR - maxMMRDifference && 
-          qp.userId[modeField] <= highestMMR + maxMMRDifference))
+          qp.userId[modeField] <= highestMMR + maxMMRDifference)) &&
+        matchPlayers.every(mp => 
+          calculateDistance(
+            qp.userId.location?.coordinates[1], qp.userId.location?.coordinates[0],
+            mp.userId.location?.coordinates[1], mp.userId.location?.coordinates[0]
+          ) <= 80.47 // 50 miles in km
+        )
       );
     }
 
     if (player) {
       const playerData = { 
         userId: player.userId, 
-        position: position,
+        position: gameMode === '5v5' && position !== 'goalkeeper' ? 'non-goalkeeper' : position,
         team: team
       };
       matchPlayers.push(playerData);
@@ -945,7 +1116,7 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     }
     return false;
   };
-  
+
   const positions = gameMode === '5v5' ? 
   ['goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper'] :
   ['goalkeeper', 'fullback', 'fullback', 'centerback', 'centerback', 'winger', 'winger', 'midfielder', 'midfielder', 'midfielder', 'striker'];
@@ -1019,21 +1190,88 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
 
   if (matchPlayers.length === playerCount) {
     console.log(`Successfully created match with ${matchPlayers.length} players, including at least one real player`);
-
+  
     try {
+      const centerLat = matchPlayers.reduce((sum, p) => sum + (p.userId.location?.coordinates[1] || 0), 0) / matchPlayers.length;
+      const centerLon = matchPlayers.reduce((sum, p) => sum + (p.userId.location?.coordinates[0] || 0), 0) / matchPlayers.length;
+  
+      console.log('Center coordinates:', { centerLat, centerLon });
+  
+      const now = DateTime.local();
+      const fourHoursLater = now.plus({ hours: 4 });
+      
+      // Updated field query
+      const fields = await Field.find({
+        size: { $in: [gameMode, 'both'] },
+        location: {
+          $near: {
+            $geometry: {
+              type: 'Point',
+              coordinates: [centerLon, centerLat]
+            },
+            $maxDistance: 80467 // 50 miles in meters
+          }
+        }
+      }).sort('location');
+      
+      console.log(`Found ${fields.length} potential fields`);
+  
+      if (fields.length === 0) {
+        console.log('No suitable fields found');
+        await returnPlayersToQueue(matchPlayers, gameMode);
+        return null;
+      }
+  
+      // Find the first available time slot
+      let selectedField;
+      let selectedSlot;
+      for (const field of fields) {
+        console.log(`Checking field: ${field.name} at [${field.location.coordinates}]`);
+        for (const av of field.availability) {
+          const availableSlot = av.slots.find(slot => 
+            DateTime.fromJSDate(slot.startTime) >= now &&
+            DateTime.fromJSDate(slot.endTime) <= fourHoursLater &&
+            slot.isAvailable
+          );
+          if (availableSlot) {
+            selectedField = field;
+            selectedSlot = availableSlot;
+            console.log(`Selected field: ${selectedField.name}, Slot: ${selectedSlot.startTime} - ${selectedSlot.endTime}`);
+            break;
+          }
+        }
+        if (selectedField) break;
+      }
+  
+      if (!selectedField || !selectedSlot) {
+        console.log('No available time slots found');
+        await returnPlayersToQueue(matchPlayers, gameMode);
+        return null;
+      }
+
       const newGame = new Game({
         players: matchPlayers.map(p => p.userId._id),
         gameMode,
         status: 'lobby',
-        startTime: new Date()
+        startTime: selectedSlot.startTime,
+        endTime: selectedSlot.endTime,
+        field: selectedField._id
       });
 
       await newGame.save();
 
+      // Update field availability
+      selectedSlot.isAvailable = false;
+      await selectedField.save();
+
       const matchResult = {
         gameId: newGame._id,
         team1: formatTeamData(blueTeam, modeField),
-        team2: formatTeamData(redTeam, modeField)
+        team2: formatTeamData(redTeam, modeField),
+        fieldName: selectedField.name,
+        fieldLocation: selectedField.location,
+        startTime: selectedSlot.startTime,
+        endTime: selectedSlot.endTime
       };
 
       notifyMatchedPlayers(matchResult.team1.concat(matchResult.team2), matchResult);
@@ -1049,6 +1287,7 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
   await returnPlayersToQueue(matchPlayers, gameMode);
   return null;
 }
+
 function isPlayerSuitableForPosition(player, position) {
   if (position === 'goalkeeper') {
     return player.position === 'goalkeeper' || player.secondaryPosition === 'goalkeeper';
@@ -1086,7 +1325,6 @@ function formatTeamData(team, modeField) {
     team: p.team
   }));
 }
-
 
 app.post('/api/queue/join', authMiddleware, async (req, res) => {
   try {
@@ -1220,7 +1458,32 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
       res.status(500).json({ error: 'Internal server error', details: error.message });
     }
   });
-
+ 
+  app.get('/api/field/:gameId', authMiddleware, async (req, res) => {
+    try {
+      const game = await Game.findById(req.params.gameId).populate('field');
+      if (!game) {
+        return res.status(404).json({ error: 'Game not found' });
+      }
+  
+      const field = game.field;
+      if (!field) {
+        return res.status(404).json({ error: 'Field not found for this game' });
+      }
+  
+      // Generate a Google Maps link
+      const gpsLink = `https://www.google.com/maps/search/?api=1&query=${field.location.coordinates[1]},${field.location.coordinates[0]}`;
+  
+      res.json({
+        name: field.name,
+        gpsLink: gpsLink,
+        image: field.imagePath ? `${API_BASE_URL}/uploads/${field.imagePath}` : '/default-field.jpg'
+      });
+    } catch (error) {
+      console.error('Error fetching field info:', error);
+      res.status(500).json({ error: 'Failed to fetch field information' });
+    }
+  });
   // Update profile picture
   app.post('/api/user/profile-picture', authMiddleware, upload.single('profilePicture'), async (req, res) => {
     try {
@@ -1394,10 +1657,16 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
     }
   });
   
-  // Helper function to calculate distance between two points
-  function calculateDistance(point1, point2) {
-    // Implement distance calculation logic here
-    // You can use a library like geolib or implement the Haversine formula
+  function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371; // Radius of the Earth in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c; // Distance in km
   }
   
   function calculateAverageMMR(game) {
@@ -1486,25 +1755,42 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
       }
     }
   }
-
+  function getRandomLocationWithin50Miles(baseLat, baseLon) {
+    const radiusInMeters = 80467; // 50 miles in meters
+    const bearing = Math.random() * 360; // Random bearing in degrees
+    const distance = Math.random() * radiusInMeters; // Random distance within the radius
+  
+    const destination = computeDestinationPoint(
+      { latitude: baseLat, longitude: baseLon },
+      distance,
+      bearing
+    );
+  
+    return [destination.longitude, destination.latitude];
+  }
   // Add this function to create dummy players
   async function createDummyPlayers() {
     const positions = ['goalkeeper', 'center back', 'midfielder', 'striker', 'full back', 'winger'];
     const skillLevels = ['beginner', 'average', 'intermediate', 'advanced', 'pro'];
-
+  
+    // Assuming your location is stored in an environment variable or config file
+    const YOUR_LATITUDE = parseFloat(process.env.YOUR_LATITUDE) || 40.7128;
+    const YOUR_LONGITUDE = parseFloat(process.env.YOUR_LONGITUDE) || -74.0060;
+  
     for (let i = 0; i < 110; i++) {
       const name = `Dummy${i + 1}`;
       const email = `dummy${i + 1}@example.com`;
       const sex = i % 2 === 0 ? 'male' : 'female';
       const position = positions[i % positions.length];
-      const secondaryPosition = positions[(i + 1) % positions.length]; // Ensure different secondary position
-      const skillLevel = skillLevels[Math.floor(i / 22)]; // Distribute skill levels more evenly
+      const secondaryPosition = positions[(i + 1) % positions.length];
+      const skillLevel = skillLevels[Math.floor(i / 22)];
       const dateOfBirth = new Date(1990, 0, 1);
-
+  
       const existingUser = await User.findOne({ email });
       if (!existingUser) {
         const hashedPassword = await bcrypt.hash('dummypassword', 10);
         const mmr = getMMRFromSkillLevel(skillLevel);
+        const [longitude, latitude] = getRandomLocationWithin50Miles(YOUR_LATITUDE, YOUR_LONGITUDE);
         const user = new User({
           name,
           email,
@@ -1517,13 +1803,17 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
           mmr5v5: mmr,
           mmr11v11: mmr,
           dateOfBirth,
+          location: {
+            type: 'Point',
+            coordinates: [longitude, latitude]
+          }
         });
         await user.save();
-        console.log(`Created dummy player: ${name} (${position})`);
+        console.log(`Created dummy player: ${name} (${position}) at [${longitude}, ${latitude}]`);
       }
     }
   }
- 
+  
   async function addDummyPlayersToQueue() {
     try {
       const dummyPlayers = await User.find({ email: /^dummy/ });

@@ -31,9 +31,10 @@ interface MatchPlayer {
 
 interface Match {
   id: string;
-  gameId: string; // Add this line
+  gameId: string;
   team1: MatchPlayer[];
   team2: MatchPlayer[];
+  // Add any other properties that might be present in the match object
 }
 
 interface GameScreenProps {
@@ -58,11 +59,26 @@ interface UserProfileData {
   cityTown: string;
 }
 
+interface FieldInfo {
+  name: string;
+  gpsLink: string;
+  image: string;
+}
+
 export default function GameScreen({ match: initialMatch, gameMode, onBackFromGame, currentUserId }: GameScreenProps) {
   const router = useRouter();
   const { gameState, setGameState } = useGameState();
   const { user, isLoading, initializeUser } = useContext(UserContext);
-  const [match, setMatch] = useState<Match | null>(initialMatch);
+  const [match, setMatch] = useState<Match | null>(() => {
+    if (initialMatch) {
+      return {
+        ...initialMatch,
+        team1: Array.isArray(initialMatch.team1) ? initialMatch.team1 : [],
+        team2: Array.isArray(initialMatch.team2) ? initialMatch.team2 : []
+      };
+    }
+    return null;
+  });
   const [showChat, setShowChat] = useState(false)
   const [showPlayerList, setShowPlayerList] = useState(false)
   const [chatMessages, setChatMessages] = useState<{ sender: string; message: string; team: 'blue' | 'red' }[]>([])
@@ -75,8 +91,12 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   const [lobbyTime, setLobbyTime] = useState(0);
   const [userPlayer, setUserPlayer] = useState<MatchPlayer | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
+  const [fieldInfo, setFieldInfo] = useState<FieldInfo | null>(null);
 
-  const players = match ? [...match.team1, ...match.team2] : [];
+  const players = match ? [
+    ...(Array.isArray(match.team1) ? match.team1 : []),
+    ...(Array.isArray(match.team2) ? match.team2 : [])
+  ] : [];
 
   const handleLeaveGame = async () => {
     try {
@@ -397,37 +417,26 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
   useEffect(() => {
     if (match && user) {
-      const allPlayers = [...match.team1, ...match.team2];
+      const allPlayers = [
+        ...(Array.isArray(match.team1) ? match.team1 : []),
+        ...(Array.isArray(match.team2) ? match.team2 : [])
+      ];
       console.log('All players:', allPlayers);
-      console.log('User ID to match:', user.id || user.userId);
+      console.log('Current user:', user);
       let foundPlayer = allPlayers.find(p => p.id === (user.id || user.userId));
       
       if (foundPlayer) {
-        foundPlayer = {
-          ...foundPlayer,
-          team: foundPlayer.team,
-          position: foundPlayer.position === 'non-goalkeeper' && gameMode === '5v5' 
-            ? user.position 
-            : foundPlayer.position,
-          secondaryPosition: user.secondaryPosition || 'Not specified'
-        };
+        console.log('Found player in match:', foundPlayer);
+        setUserPlayer(foundPlayer);
       } else {
         console.log('User not found in match. This should not happen.');
-        foundPlayer = {
-          id: user.id || user.userId,
-          name: user.name,
-          position: user.position || 'Not specified',
-          secondaryPosition: user.secondaryPosition || 'Not specified',
-          assignedPosition: 'primary',
-          team: 'blue',
-          profilePicture: user.profilePicture
-        };
+        // Instead of adding the user to the match, we'll exit the game
+        alert('You are not part of this match. Returning to the main screen.');
+        onBackFromGame(true); // This should take the user back to the main screen
+        return; // Exit the effect early
       }
-      
-      console.log('Found or assigned user player:', foundPlayer);
-      setUserPlayer(foundPlayer);
     }
-  }, [match, user, gameMode]);
+  }, [match, user, gameMode, onBackFromGame]);
 
   useEffect(() => {
     if (match && !match.id) {
@@ -446,6 +455,24 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       console.error('No game ID found in initialMatch or gameState');
     }
   }, [initialMatch, gameState]);
+
+  useEffect(() => {
+    const fetchFieldInfo = async () => {
+      if (match && match.id) {
+        try {
+          const token = localStorage.getItem('token');
+          const response = await axios.get(`${API_BASE_URL}/api/field/${match.id}`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          setFieldInfo(response.data);
+        } catch (error) {
+          console.error('Error fetching field info:', error);
+        }
+      }
+    };
+
+    fetchFieldInfo();
+  }, [match]);
 
   const handleBackClick = () => {
     console.log('Back button clicked');
@@ -545,18 +572,28 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
           <div className={`absolute ${userPlayer?.team === 'blue' ? 'right-1/4' : 'left-1/4'} inset-y-0 transform ${userPlayer?.team === 'blue' ? 'translate-x-1/2' : '-translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
             <div className="text-center">
               <p className="text-4xl font-bold text-white mb-2">Field Location:</p>
-              <p className="text-3xl text-white">{fieldLocation.name}</p>
+              <p className="text-3xl text-white">{fieldInfo?.name || 'Loading...'}</p>
             </div>
             <div className="w-56 h-56 relative">
-              <Image
-                src={fieldLocation.image}
-                alt="Field Location"
-                layout="fill"
-                objectFit="cover"
-                className="rounded-lg"
-              />
+              {fieldInfo ? (
+                <Image
+                  src={fieldInfo.image}
+                  alt="Field Location"
+                  layout="fill"
+                  objectFit="cover"
+                  className="rounded-lg"
+                />
+              ) : (
+                <div className="w-full h-full bg-gray-300 flex items-center justify-center rounded-lg">
+                  <p className="text-gray-600">Loading field image...</p>
+                </div>
+              )}
             </div>
-            <a href={fieldLocation.gpsLink} target="_blank" rel="noopener noreferrer" className="text-2xl text-blue-300 underline">GPS Link</a>
+            {fieldInfo && (
+              <a href={fieldInfo.gpsLink} target="_blank" rel="noopener noreferrer" className="text-2xl text-blue-300 underline">
+                GPS Link
+              </a>
+            )}
           </div>
 
           {/* Game state display */}
@@ -718,7 +755,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <h4 className="font-semibold text-blue-600 mb-2">Blue Team</h4>
                     <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
-                        {match && match.team1.map((player, index) => (
+                        {match && Array.isArray(match.team1) && match.team1.map((player, index) => (
                           <li 
                             key={`blue-${player.id}-${index}`} 
                             className="flex items-center space-x-2 cursor-pointer" 
@@ -753,7 +790,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                     <h4 className="font-semibold text-red-600 mb-2">Red Team</h4>
                     <ScrollArea className="h-[calc(100%-2rem)]">
                       <ul className="space-y-2">
-                        {match && match.team2.map((player, index) => (
+                        {match && Array.isArray(match.team2) && match.team2.map((player, index) => (
                           <li 
                             key={`red-${player.id}-${index}`} 
                             className="flex items-center space-x-2 cursor-pointer" 

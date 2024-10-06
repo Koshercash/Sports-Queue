@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useContext, useCallback } from 'react';
+import React, { useState, useEffect, useContext, useCallback, useRef } from 'react';
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "../../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -153,6 +153,8 @@ export default function MainScreen() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
 
+  const wsRef = useRef<WebSocket | null>(null);
+
   const totalNotifications = pendingRequests.length + newMessages;
 
   const handleTabChange = (value: string) => {
@@ -254,6 +256,11 @@ export default function MainScreen() {
         );
         console.log('Queue join response:', response.data);
         
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          const decoded = jwtDecode(token) as { userId: string };
+          wsRef.current.send(JSON.stringify({ type: 'auth', userId: decoded.userId }));
+        }
+    
         if (response.data.match) {
           console.log('Immediate match found:', response.data.match);
           setQueueStatus('matched');
@@ -635,6 +642,25 @@ export default function MainScreen() {
   };
   
   useEffect(() => {
+    const updateUserLocation = async () => {
+      if (latitude && longitude) {
+        try {
+          const token = localStorage.getItem('token');
+          await axios.post(
+            `${API_BASE_URL}/api/user/update-location`,
+            { latitude, longitude },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        } catch (error) {
+          console.error('Failed to update user location:', error);
+        }
+      }
+    };
+
+    updateUserLocation();
+  }, [latitude, longitude]);
+
+  useEffect(() => {
     const fetchData = async () => {
       await fetchMatchHistory();
       if (latitude && longitude) {
@@ -807,56 +833,65 @@ export default function MainScreen() {
   }, [router]);
   
   useEffect(() => {
-    const ws = new WebSocket(`ws://${window.location.hostname}:${process.env.NEXT_PUBLIC_SERVER_PORT || 3002}`);
+    let ws: WebSocket | null = null;
+  
+    const connectWebSocket = () => {
+      ws = new WebSocket(`ws://${window.location.hostname}:${process.env.NEXT_PUBLIC_SERVER_PORT || 3002}`);
+      
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        const token = localStorage.getItem('token');
+        if (token && ws) {
+          const decoded = jwtDecode(token) as { userId: string };
+          ws.send(JSON.stringify({ type: 'auth', userId: decoded.userId }));
+        }
+      };
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        console.log('WebSocket message received:', data);
+        if (data.type === 'matchFound') {
+          console.log('Match found:', data.matchDetails);
+          setQueueStatus('matched');
+          setMatch(data.matchDetails);
+          setGameState('loading');
+          setIsGameInProgress(true);
+          
+          const gameStateToSave = {
+            gameState: 'lobby',
+            match: data.matchDetails,
+            mode: gameMode,
+            lobbyTime: 0,
+            gameEnded: false,
+            savedAt: new Date().toISOString(),
+            matchId: data.matchDetails.gameId
+          };
+          localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
+          
+          setTimeout(() => {
+            setGameState('inGame');
+            setInGame(true);
+            setLobbyTime(0);
+          }, 3000);
+        }
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+      };
     
-    ws.onopen = () => {
-      console.log('WebSocket connected');
-      const token = localStorage.getItem('token');
-      if (token) {
-        const decoded = jwtDecode(token) as { userId: string };
-        ws.send(JSON.stringify({ type: 'auth', userId: decoded.userId }));
-      }
-    };
-    
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      console.log('WebSocket message received:', data);
-      if (data.type === 'match_found') {
-        console.log('Match found:', data.matchDetails);
-        setQueueStatus('matched');
-        setMatch(data.matchDetails);
-        setGameState('loading');
-        setIsGameInProgress(true);
-        
-        const gameStateToSave = {
-          gameState: 'lobby',
-          match: data.matchDetails,
-          mode: gameMode,
-          lobbyTime: 0,
-          gameEnded: false,
-          savedAt: new Date().toISOString(),
-          matchId: data.matchDetails.gameId
-        };
-        localStorage.setItem('gameState', JSON.stringify(gameStateToSave));
-        
-        setTimeout(() => {
-          setGameState('inGame');
-          setInGame(true);
-          setLobbyTime(0);
-        }, 3000);
-      }
-    };
-    
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      ws.onclose = () => {
+        console.log('WebSocket connection closed. Reconnecting...');
+        setTimeout(connectWebSocket, 5000);
+      };
     };
   
-    ws.onclose = () => {
-      console.log('WebSocket connection closed');
-    };
-    
+    connectWebSocket();
+  
     return () => {
-      ws.close();
+      if (ws) {
+        ws.close();
+      }
     };
   }, [gameMode]);
  
