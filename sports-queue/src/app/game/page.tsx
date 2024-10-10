@@ -67,6 +67,33 @@ interface FieldInfo {
   longitude: number;
 }
 
+const ProfileImage = ({ src, alt, className = "" }) => {
+  const [error, setError] = useState(false);
+
+  if (error) {
+    return (
+      <div className={`relative w-full h-full rounded-full overflow-hidden bg-gray-200 ${className}`}>
+        <img src="/default-avatar.jpg" alt={alt} className="absolute inset-0 w-full h-full object-cover" />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`relative w-full h-full rounded-full overflow-hidden bg-gray-200 ${className}`}>
+      <Image
+        src={src}
+        alt={alt}
+        layout="fill"
+        objectFit="cover"
+        onError={() => {
+          console.error('Error loading profile image:', src);
+          setError(true);
+        }}
+      />
+    </div>
+  );
+};
+
 export default function GameScreen({ match: initialMatch, gameMode, onBackFromGame, currentUserId }: GameScreenProps) {
   const router = useRouter();
   const { gameState, setGameState } = useGameState();
@@ -155,34 +182,33 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   };
 
   const handlePlayerClick = async (playerId: string) => {
-    console.log('handlePlayerClick called with playerId:', playerId);
-    console.log('Current match state:', match);
-    
-    if (!playerId || typeof playerId !== 'string') {
-      console.error('Invalid player ID:', playerId);
-      return;
-    }
-
+    console.log('Player clicked:', playerId);
     try {
       const token = localStorage.getItem('token');
       if (!token) {
-        console.error('No token found in localStorage');
+        console.error('No authentication token found');
         return;
       }
 
-      console.log('Sending request to:', `${API_BASE_URL}/api/user/${playerId}`);
-      const response = await axios.get<UserProfileData>(`${API_BASE_URL}/api/user/${playerId}`, {
-        headers: { Authorization: `Bearer ${token}` }
+      const response = await axios.get(`${API_BASE_URL}/api/user/${playerId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
       });
+      console.log('Fetched user profile:', response.data);
       
-      console.log('Profile data received:', response.data);
-      setSelectedProfile(response.data);
+      const processedProfile = {
+        ...response.data,
+        profilePicture: getProfilePictureUrl(response.data.profilePicture)
+      };
+      console.log('Processed profile:', processedProfile);
+      
+      setSelectedProfile(processedProfile);
     } catch (error) {
-      console.error('Failed to fetch user profile:', error);
+      console.error('Error fetching user profile:', error);
       if (axios.isAxiosError(error)) {
         console.error('Axios error details:', error.response?.data);
       }
-      alert('Failed to load user profile. Please try again.');
     }
   };
 
@@ -257,17 +283,23 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   };
 
   const getProfilePictureUrl = (profilePicture: string | null | undefined): string => {
+    console.log('getProfilePictureUrl called with:', profilePicture);
+    
     if (!profilePicture) {
-      return '/default-avatar.jpg'; // Path to your default avatar image
+      console.log('No profile picture, using default');
+      return '/default-avatar.jpg';
     }
     
-    // Check if the profilePicture is already a full URL
     if (profilePicture.startsWith('http://') || profilePicture.startsWith('https://')) {
+      console.log('Full URL detected, returning as-is:', profilePicture);
       return profilePicture;
     }
     
-    // If it's not a full URL, assume it's a relative path and prepend the API base URL
-    return `${API_BASE_URL}/uploads/${profilePicture}`;
+    // Remove any leading slashes and 'uploads/'
+    const cleanProfilePicture = profilePicture.replace(/^\/?(uploads\/)?/, '');
+    const fullUrl = `${API_BASE_URL}/uploads/${cleanProfilePicture}`;
+    console.log('Constructed full URL:', fullUrl);
+    return fullUrl;
   };
 
   const positionOrder = ['goalkeeper', 'defender', 'midfielder', 'striker'];
@@ -613,17 +645,9 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
             <p className="text-4xl font-bold text-white mb-2">Position:</p>
             <div className={`w-48 h-48 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative`}>
               {userPlayer.profilePicture ? (
-                <Image
+                <ProfileImage
                   src={getProfilePictureUrl(userPlayer.profilePicture)}
                   alt={userPlayer.name}
-                  layout="fill"
-                  objectFit="cover"
-                  className="rounded-full"
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    target.onerror = null;
-                    target.src = '/default-avatar.jpg';
-                  }}
                 />
               ) : (
                 <div className="w-full h-full bg-gray-200 flex items-center justify-center">
@@ -850,17 +874,9 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                           >
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
-                                <Image
+                                <ProfileImage
                                   src={getProfilePictureUrl(player.profilePicture)}
                                   alt={player.name}
-                                  width={40}
-                                  height={40}
-                                  className="object-cover w-full h-full"
-                                  onError={(e) => {
-                                    const target = e.target as HTMLImageElement;
-                                    target.onerror = null;
-                                    target.src = '/default-avatar.jpg';
-                                  }}
                                 />
                               ) : (
                                 <User className="text-gray-400" size={24} />
@@ -887,17 +903,9 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                           >
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
-                                <Image
+                                <ProfileImage
                                   src={getProfilePictureUrl(player.profilePicture)}
                                   alt={player.name}
-                                  width={40}
-                                  height={40}
-                                  className="object-cover w-full h-full"
-                                  onError={(e) => {
-                                    const target = e.target as HTMLImageElement;
-                                    target.onerror = null;
-                                    target.src = '/default-avatar.jpg';
-                                  }}
                                 />
                               ) : (
                                 <User className="text-gray-400" size={24} />
@@ -932,7 +940,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
               isEditable={false}
               cityTown={selectedProfile.cityTown}
               secondaryPosition={selectedProfile.secondaryPosition || ''}
-              profilePicture={getProfilePictureUrl(selectedProfile.profilePicture)}
+              profilePicture={selectedProfile.profilePicture || '/default-avatar.jpg'}
             />
             <div className="flex justify-between mt-4">
               <Button onClick={() => setSelectedProfile(null)}>Close</Button>
