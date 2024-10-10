@@ -15,8 +15,15 @@ import http from 'http';
 import axios from 'axios';
 import { DateTime } from 'luxon';
 import { getDistance, computeDestinationPoint } from 'geolib';
+import { createRealFields } from './scripts/createRealFields.js';
+import { findAndScheduleField } from './scripts/findAndScheduleField.js';
+import { Game } from './models/Game.js';
+import { Field } from './models/Field.js';
 
 dotenv.config();
+
+// Add this line
+const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3002';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -176,7 +183,8 @@ async function startServer() {
         endTime: Date,
         isAvailable: Boolean
       }]
-    }]
+    }],
+    imageUrl: String
   });
 
   const ScheduledGameSchema = new mongoose.Schema({
@@ -190,13 +198,11 @@ async function startServer() {
 
   // Create models
   const Friend = mongoose.model('Friend', FriendSchema);
-  const Game = mongoose.model('Game', GameSchema);
   const Queue = mongoose.model('Queue', QueueSchema);
   const Penalty = mongoose.model('Penalty', PenaltySchema);
   const Report = mongoose.model('Report', ReportSchema);
   const Ban = mongoose.model('Ban', BanSchema);
   const BanAppeal = mongoose.model('BanAppeal', BanAppealSchema);
-  const Field = mongoose.model('Field', FieldSchema);
   const ScheduledGame = mongoose.model('ScheduledGame', ScheduledGameSchema);
 
   // Create indexes after models are defined
@@ -347,56 +353,27 @@ async function startServer() {
     return null;
   }
   
-  async function createTestFields() {
-    const existingFields = await Field.countDocuments();
-    if (existingFields === 0) {
-      const YOUR_LATITUDE = parseFloat(process.env.YOUR_LATITUDE) || 35.132320;
-      const YOUR_LONGITUDE = parseFloat(process.env.YOUR_LONGITUDE) || -118.449074;
-  
-      const testFields = [];
-      for (let i = 0; i < 20; i++) {
-        const [longitude, latitude] = getRandomLocationWithin50Miles(YOUR_LATITUDE, YOUR_LONGITUDE);
-        
-        // Create availability for the next 7 days
-        const availability = [];
-        for (let j = 0; j < 7; j++) {
-          const date = new Date();
-          date.setDate(date.getDate() + j);
-          const slots = [];
-          for (let hour = 8; hour < 22; hour++) { // 8 AM to 10 PM
-            const startTime = new Date(date);
-            startTime.setHours(hour, 0, 0, 0);
-            const endTime = new Date(startTime);
-            endTime.setHours(hour + 1, 0, 0, 0);
-            slots.push({
-              startTime,
-              endTime,
-              isAvailable: Math.random() > 0.3 // 70% chance of being available
-            });
-          }
-          availability.push({ date, slots });
-        }
-
-        testFields.push({
-          name: `Test Field ${i + 1}`,
-          size: i % 3 === 0 ? '5v5' : i % 3 === 1 ? '11v11' : 'both',
-          location: {
-            type: 'Point',
-            coordinates: [longitude, latitude]
-          },
-          availability
-        });
-      }
-  
-      await Field.insertMany(testFields);
-      console.log(`Created ${testFields.length} test fields`);
+  // Add a new function to create real fields (you'll need to implement this)
+  async function initializeFields() {
+    const fieldsCount = await Field.countDocuments();
+    console.log(`Current field count: ${fieldsCount}`);
+    if (fieldsCount === 0) {
+      console.log('No fields found. Creating real fields...');
+      await createRealFields();
+      const newFieldsCount = await Field.countDocuments();
+      console.log(`Fields created. New field count: ${newFieldsCount}`);
     } else {
-      console.log(`${existingFields} fields already exist, skipping creation`);
+      console.log(`${fieldsCount} fields already exist in the database.`);
+      // Always recreate fields to ensure up-to-date availability
+      await Field.deleteMany({});
+      await createRealFields();
+      const newFieldsCount = await Field.countDocuments();
+      console.log(`Fields recreated with updated availability. New field count: ${newFieldsCount}`);
     }
   }
-  
-  // Call this function after connecting to the database
-  await createTestFields();
+
+  // Call initializeFields instead of createRealFields
+  await initializeFields();
 
   app.post('/api/register', upload.fields([
     { name: 'profilePicture', maxCount: 1 },
@@ -1010,7 +987,7 @@ async function startMatchmakingProcess() {
 async function notifyMatchedPlayers(players, matchResult) {
   console.log('Notifying matched players:', players.map(p => p.id));
   
-  players.forEach(player => {
+  for (const player of players) {
     const ws = activeConnections.get(player.id.toString());
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
@@ -1018,6 +995,7 @@ async function notifyMatchedPlayers(players, matchResult) {
         matchDetails: {
           gameId: matchResult.gameId,
           fieldName: matchResult.fieldName,
+          fieldImageUrl: matchResult.imageUrl, 
           startTime: matchResult.startTime,
           endTime: matchResult.endTime,
           team: player.team
@@ -1026,8 +1004,10 @@ async function notifyMatchedPlayers(players, matchResult) {
       console.log(`Notified player ${player.id} about match`);
     } else {
       console.log(`WebSocket not found or not open for player ${player.id}`);
+      // You might want to implement an alternative notification method here,
+      // such as sending an email or push notification
     }
-  });
+  }
 }
 async function tryCreateMatch(gameMode, modeField, playerCount, requiredPositions) {
   console.log(`Attempting to create match for ${gameMode}`);
@@ -1192,86 +1172,55 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     console.log(`Successfully created match with ${matchPlayers.length} players, including at least one real player`);
   
     try {
-      const centerLat = matchPlayers.reduce((sum, p) => sum + (p.userId.location?.coordinates[1] || 0), 0) / matchPlayers.length;
-      const centerLon = matchPlayers.reduce((sum, p) => sum + (p.userId.location?.coordinates[0] || 0), 0) / matchPlayers.length;
-  
-      console.log('Center coordinates:', { centerLat, centerLon });
-  
-      const now = DateTime.local();
-      const fourHoursLater = now.plus({ hours: 4 });
-      
-      // Updated field query
-      const fields = await Field.find({
-        size: { $in: [gameMode, 'both'] },
-        location: {
-          $near: {
-            $geometry: {
-              type: 'Point',
-              coordinates: [centerLon, centerLat]
-            },
-            $maxDistance: 80467 // 50 miles in meters
-          }
-        }
-      }).sort('location');
-      
-      console.log(`Found ${fields.length} potential fields`);
-  
-      if (fields.length === 0) {
-        console.log('No suitable fields found');
+      const fieldSchedule = await findAndScheduleField(matchPlayers.map(p => p.userId), gameMode);
+
+      if (!fieldSchedule) {
+        console.log('No suitable field or time slot found');
         await returnPlayersToQueue(matchPlayers, gameMode);
         return null;
       }
-  
-      // Find the first available time slot
-      let selectedField;
-      let selectedSlot;
-      for (const field of fields) {
-        console.log(`Checking field: ${field.name} at [${field.location.coordinates}]`);
-        for (const av of field.availability) {
-          const availableSlot = av.slots.find(slot => 
-            DateTime.fromJSDate(slot.startTime) >= now &&
-            DateTime.fromJSDate(slot.endTime) <= fourHoursLater &&
-            slot.isAvailable
-          );
-          if (availableSlot) {
-            selectedField = field;
-            selectedSlot = availableSlot;
-            console.log(`Selected field: ${selectedField.name}, Slot: ${selectedSlot.startTime} - ${selectedSlot.endTime}`);
-            break;
-          }
-        }
-        if (selectedField) break;
-      }
-  
-      if (!selectedField || !selectedSlot) {
-        console.log('No available time slots found');
-        await returnPlayersToQueue(matchPlayers, gameMode);
-        return null;
-      }
+
+      console.log('Field schedule:', JSON.stringify(fieldSchedule, null, 2));
 
       const newGame = new Game({
         players: matchPlayers.map(p => p.userId._id),
         gameMode,
         status: 'lobby',
-        startTime: selectedSlot.startTime,
-        endTime: selectedSlot.endTime,
-        field: selectedField._id
+        startTime: fieldSchedule.startTime,
+        endTime: fieldSchedule.endTime,
+        field: fieldSchedule.field._id
       });
 
       await newGame.save();
 
       // Update field availability
-      selectedSlot.isAvailable = false;
-      await selectedField.save();
+      if (fieldSchedule.availabilityIndex !== undefined && fieldSchedule.slotIndex !== undefined) {
+        const field = await Field.findById(fieldSchedule.field._id);
+        if (field && field.availability && field.availability[fieldSchedule.availabilityIndex]) {
+          const availabilitySlot = field.availability[fieldSchedule.availabilityIndex];
+          if (availabilitySlot.slots && availabilitySlot.slots[fieldSchedule.slotIndex]) {
+            availabilitySlot.slots[fieldSchedule.slotIndex].isAvailable = false;
+            await field.save();
+            console.log('Field availability updated successfully');
+          } else {
+            console.log('Warning: Could not update field availability - slot not found');
+          }
+        } else {
+          console.log('Warning: Could not update field availability - availability not found');
+        }
+      } else {
+        console.log('Warning: Could not update field availability due to missing indices');
+      }
 
       const matchResult = {
         gameId: newGame._id,
         team1: formatTeamData(blueTeam, modeField),
         team2: formatTeamData(redTeam, modeField),
-        fieldName: selectedField.name,
-        fieldLocation: selectedField.location,
-        startTime: selectedSlot.startTime,
-        endTime: selectedSlot.endTime
+        fieldName: fieldSchedule.field.name,
+        fieldLocation: fieldSchedule.field.location,
+        startTime: fieldSchedule.startTime,
+        endTime: fieldSchedule.endTime,
+        imageUrl: fieldSchedule.field.imageUrl
       };
 
       notifyMatchedPlayers(matchResult.team1.concat(matchResult.team2), matchResult);
@@ -1474,16 +1423,22 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
       // Generate a Google Maps link
       const gpsLink = `https://www.google.com/maps/search/?api=1&query=${field.location.coordinates[1]},${field.location.coordinates[0]}`;
   
-      res.json({
-        name: field.name,
-        gpsLink: gpsLink,
-        image: field.imagePath ? `${API_BASE_URL}/uploads/${field.imagePath}` : '/default-field.jpg'
-      });
-    } catch (error) {
-      console.error('Error fetching field info:', error);
-      res.status(500).json({ error: 'Failed to fetch field information' });
-    }
-  });
+      const imageUrl = field.imageUrl.startsWith('http') 
+      ? field.imageUrl 
+      : `${API_BASE_URL}${field.imageUrl}`;
+
+    res.json({
+      name: field.name,
+      gpsLink: gpsLink,
+      imageUrl: imageUrl,
+      latitude: field.location.coordinates[1],
+      longitude: field.location.coordinates[0]
+    });
+  } catch (error) {
+    console.error('Error fetching field info:', error);
+    res.status(500).json({ error: 'Failed to fetch field information' });
+  }
+});
   // Update profile picture
   app.post('/api/user/profile-picture', authMiddleware, upload.single('profilePicture'), async (req, res) => {
     try {

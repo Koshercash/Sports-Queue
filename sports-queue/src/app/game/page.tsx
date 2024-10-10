@@ -62,7 +62,9 @@ interface UserProfileData {
 interface FieldInfo {
   name: string;
   gpsLink: string;
-  image: string;
+  imageUrl: string;
+  latitude: number;
+  longitude: number;
 }
 
 export default function GameScreen({ match: initialMatch, gameMode, onBackFromGame, currentUserId }: GameScreenProps) {
@@ -92,6 +94,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   const [userPlayer, setUserPlayer] = useState<MatchPlayer | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
   const [fieldInfo, setFieldInfo] = useState<FieldInfo | null>(null);
+  const [isFieldInfoLoading, setIsFieldInfoLoading] = useState(true);
 
   const players = match ? [
     ...(Array.isArray(match.team1) ? match.team1 : []),
@@ -362,6 +365,11 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     console.log('Current user from context:', user);
     console.log('Current userId prop:', currentUserId);
     
+    if (initialMatch) {
+      console.log('Setting match from initialMatch:', initialMatch);
+      setMatch(initialMatch);
+    }
+
     // Load game state from localStorage on component mount
     const savedGameStateString = localStorage.getItem('gameState');
     if (savedGameStateString) {
@@ -412,10 +420,6 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   }, [initialMatch, user, currentUserId]);
 
   useEffect(() => {
-    console.log('Current match state:', match);
-  }, [match]);
-
-  useEffect(() => {
     if (match && user) {
       const allPlayers = [
         ...(Array.isArray(match.team1) ? match.team1 : []),
@@ -423,7 +427,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
       ];
       console.log('All players:', allPlayers);
       console.log('Current user:', user);
-      let foundPlayer = allPlayers.find(p => p.id === (user.id || user.userId));
+      let foundPlayer = allPlayers.find(p => p.id === (user.id || user._id || currentUserId));
       
       if (foundPlayer) {
         console.log('Found player in match:', foundPlayer);
@@ -436,7 +440,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
         return; // Exit the effect early
       }
     }
-  }, [match, user, gameMode, onBackFromGame]);
+  }, [match, user, currentUserId, onBackFromGame]);
 
   useEffect(() => {
     if (match && !match.id) {
@@ -458,19 +462,22 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
   useEffect(() => {
     const fetchFieldInfo = async () => {
-      if (match && match.id) {
+      if (match && match.gameId) {
         try {
+          setIsFieldInfoLoading(true);
           const token = localStorage.getItem('token');
-          const response = await axios.get(`${API_BASE_URL}/api/field/${match.id}`, {
+          const response = await axios.get<FieldInfo>(`${API_BASE_URL}/api/field/${match.gameId}`, {
             headers: { Authorization: `Bearer ${token}` }
           });
           setFieldInfo(response.data);
         } catch (error) {
           console.error('Error fetching field info:', error);
+        } finally {
+          setIsFieldInfoLoading(false);
         }
       }
     };
-
+  
     fetchFieldInfo();
   }, [match]);
 
@@ -491,11 +498,11 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     return <div>Loading...</div>;
   }
 
-  if (!user) {
+  if (!user || !userPlayer) {
     return (
-      <div>
-        <p>Error: User not found. Please try logging in again.</p>
-        <button onClick={() => window.location.href = '/'}>Go to Login</button>
+      <div className="flex flex-col items-center justify-center h-screen">
+        <p className="text-xl mb-4">Error: User not found or not part of this match. Please try logging in again.</p>
+        <Button onClick={() => window.location.href = '/'}>Go to Login</Button>
       </div>
     );
   }
@@ -539,60 +546,65 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
           <div className="absolute top-1/3 left-0 w-1 h-1/3 bg-white"></div>
           <div className="absolute top-1/3 right-0 w-1 h-1/3 bg-white"></div>
           
-          {userPlayer && (
-            <div className={`absolute ${userPlayer.team === 'blue' ? 'left-1/4' : 'right-1/4'} inset-y-0 transform ${userPlayer.team === 'blue' ? '-translate-x-1/2' : 'translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
-              <p className="text-4xl font-bold text-white mb-2">Position:</p>
-              <div className={`w-48 h-48 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative`}>
-                {userPlayer.profilePicture ? (
-                  <Image
-                    src={getProfilePictureUrl(userPlayer.profilePicture) || '/default-avatar.jpg'}
-                    alt={userPlayer.name}
-                    layout="fill"
-                    objectFit="cover"
-                    className="rounded-full"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.onerror = null;
-                      target.src = '/default-avatar.jpg';
-                    }}
-                  />
-                ) : (
-                  <div className="w-full h-full bg-gray-200 flex items-center justify-center">
-                    <User className="text-gray-400" size={64} />
-                  </div>
-                )}
-              </div>
-              <p className="text-4xl font-bold text-white">
-                {userPlayer.position} ({userPlayer.assignedPosition === 'primary' ? 'Primary' : 'Secondary'})
-              </p>
-            </div>
-          )}
-
-          {/* Field location information */}
-          <div className={`absolute ${userPlayer?.team === 'blue' ? 'right-1/4' : 'left-1/4'} inset-y-0 transform ${userPlayer?.team === 'blue' ? 'translate-x-1/2' : '-translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
-            <div className="text-center">
-              <p className="text-4xl font-bold text-white mb-2">Field Location:</p>
-              <p className="text-3xl text-white">{fieldInfo?.name || 'Loading...'}</p>
-            </div>
-            <div className="w-56 h-56 relative">
-              {fieldInfo ? (
+          <div className={`absolute ${userPlayer.team === 'blue' ? 'left-1/4' : 'right-1/4'} inset-y-0 transform ${userPlayer.team === 'blue' ? '-translate-x-1/2' : 'translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
+            <p className="text-4xl font-bold text-white mb-2">Position:</p>
+            <div className={`w-48 h-48 rounded-full overflow-hidden border-4 ${userPlayer.team === 'blue' ? 'border-blue-500' : 'border-red-500'} shadow-lg relative`}>
+              {userPlayer.profilePicture ? (
                 <Image
-                  src={fieldInfo.image}
-                  alt="Field Location"
+                  src={getProfilePictureUrl(userPlayer.profilePicture)}
+                  alt={userPlayer.name}
                   layout="fill"
                   objectFit="cover"
-                  className="rounded-lg"
+                  className="rounded-full"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.onerror = null;
+                    target.src = '/default-avatar.jpg';
+                  }}
                 />
               ) : (
-                <div className="w-full h-full bg-gray-300 flex items-center justify-center rounded-lg">
-                  <p className="text-gray-600">Loading field image...</p>
+                <div className="w-full h-full bg-gray-200 flex items-center justify-center">
+                  <User className="text-gray-400" size={64} />
                 </div>
               )}
             </div>
-            {fieldInfo && (
-              <a href={fieldInfo.gpsLink} target="_blank" rel="noopener noreferrer" className="text-2xl text-blue-300 underline">
-                GPS Link
-              </a>
+            <p className="text-4xl font-bold text-white">
+              {userPlayer.position} ({userPlayer.assignedPosition === 'primary' ? 'Primary' : 'Secondary'})
+            </p>
+          </div>
+
+          {/* Field location information */}
+          <div className={`absolute ${userPlayer?.team === 'blue' ? 'right-1/4' : 'left-1/4'} inset-y-0 transform ${userPlayer?.team === 'blue' ? 'translate-x-1/2' : '-translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
+            {isFieldInfoLoading ? (
+              <div className="text-center">
+                <p className="text-2xl text-white">Loading field information...</p>
+              </div>
+            ) : fieldInfo ? (
+              <div className="text-center">
+                <p className="text-4xl font-bold text-white mb-2">Field Location:</p>
+                <p className="text-3xl text-white">{fieldInfo.name}</p>
+                <div className="w-56 h-56 relative mt-2">
+                  <Image
+                    src={fieldInfo.imageUrl}
+                    alt="Field Location"
+                    layout="fill"
+                    objectFit="cover"
+                    className="rounded-lg"
+                  />
+                </div>
+                <a 
+                  href={fieldInfo.gpsLink} 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="text-2xl text-blue-300 underline mt-2 inline-block hover:text-blue-100"
+                >
+                  View on Google Maps
+                </a>
+              </div>
+            ) : (
+              <div className="text-center">
+                <p className="text-2xl text-white">Field information not available</p>
+              </div>
             )}
           </div>
 

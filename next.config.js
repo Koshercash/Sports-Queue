@@ -8,6 +8,9 @@ const nextConfig = {
       },
     ]
   },
+  images: {
+    domains: ['localhost', 'example.com'], // Add any other domains you might use for images
+  },
 }
 
 module.exports = nextConfig
