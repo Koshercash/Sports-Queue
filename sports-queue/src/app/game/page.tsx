@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useContext } from 'react'
+import React, { useEffect, useState, useContext, useRef } from 'react'
 import axios from 'axios'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -95,6 +95,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   const [gameId, setGameId] = useState<string | null>(null);
   const [fieldInfo, setFieldInfo] = useState<FieldInfo | null>(null);
   const [isFieldInfoLoading, setIsFieldInfoLoading] = useState(true);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const players = match ? [
     ...(Array.isArray(match.team1) ? match.team1 : []),
@@ -256,12 +257,17 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   };
 
   const getProfilePictureUrl = (profilePicture: string | null | undefined): string => {
-    if (!profilePicture) return '/default-avatar.jpg';
-    if (profilePicture.startsWith('http')) return profilePicture;
-    // Use the full URL for backend-served images
-    const url = `${API_BASE_URL}${profilePicture}`;
-    console.log('Generated profile picture URL:', url);
-    return url;
+    if (!profilePicture) {
+      return '/default-avatar.jpg'; // Path to your default avatar image
+    }
+    
+    // Check if the profilePicture is already a full URL
+    if (profilePicture.startsWith('http://') || profilePicture.startsWith('https://')) {
+      return profilePicture;
+    }
+    
+    // If it's not a full URL, assume it's a relative path and prepend the API base URL
+    return `${API_BASE_URL}/uploads/${profilePicture}`;
   };
 
   const positionOrder = ['goalkeeper', 'defender', 'midfielder', 'striker'];
@@ -433,11 +439,9 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
         console.log('Found player in match:', foundPlayer);
         setUserPlayer(foundPlayer);
       } else {
-        console.log('User not found in match. This should not happen.');
-        // Instead of adding the user to the match, we'll exit the game
+        console.log('User not found in match. Returning to main screen.');
         alert('You are not part of this match. Returning to the main screen.');
-        onBackFromGame(true); // This should take the user back to the main screen
-        return; // Exit the effect early
+        onBackFromGame(true);
       }
     }
   }, [match, user, currentUserId, onBackFromGame]);
@@ -466,15 +470,25 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
         try {
           setIsFieldInfoLoading(true);
           const token = localStorage.getItem('token');
+          console.log('Fetching field info for game:', match.gameId);
           const response = await axios.get<FieldInfo>(`${API_BASE_URL}/api/field/${match.gameId}`, {
-            headers: { Authorization: `Bearer ${token}` }
+            headers: { 
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            }
           });
+          console.log('Field info received:', response.data);
           setFieldInfo(response.data);
         } catch (error) {
           console.error('Error fetching field info:', error);
+          if (axios.isAxiosError(error)) {
+            console.error('Axios error details:', error.response?.data);
+          }
         } finally {
           setIsFieldInfoLoading(false);
         }
+      } else {
+        console.log('No game ID available to fetch field info');
       }
     };
   
@@ -493,6 +507,55 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     localStorage.setItem('gameState', JSON.stringify(currentGameState));
     onBackFromGame();
   };
+
+  useEffect(() => {
+    let reconnectInterval: NodeJS.Timeout;
+
+    const connectWebSocket = () => {
+      if (user && user.id) {
+        if (wsRef.current) {
+          wsRef.current.close();
+        }
+
+        wsRef.current = new WebSocket(`ws://localhost:3002`);
+        
+        wsRef.current.onopen = () => {
+          console.log('WebSocket connected');
+          if (wsRef.current) {
+            wsRef.current.send(JSON.stringify({ type: 'auth', userId: user.id }));
+          }
+        };
+
+        wsRef.current.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          // Handle incoming messages
+          console.log('Received message:', data);
+        };
+
+        wsRef.current.onerror = (error) => {
+          console.error('WebSocket error:', error);
+        };
+
+        wsRef.current.onclose = () => {
+          console.log('WebSocket connection closed. Reconnecting...');
+          reconnectInterval = setTimeout(connectWebSocket, 5000);
+        };
+      }
+    };
+
+    if (!isLoading && user) {
+      connectWebSocket();
+    }
+
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      if (reconnectInterval) {
+        clearTimeout(reconnectInterval);
+      }
+    };
+  }, [user, isLoading]);
 
   if (isLoading) {
     return <div>Loading...</div>;
@@ -584,22 +647,20 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                 <p className="text-4xl font-bold text-white mb-2">Field Location:</p>
                 <p className="text-3xl text-white">{fieldInfo.name}</p>
                 <div className="w-56 h-56 relative mt-2">
-                  <Image
-                    src={fieldInfo.imageUrl}
-                    alt="Field Location"
-                    layout="fill"
-                    objectFit="cover"
-                    className="rounded-lg"
-                  />
+                <Image
+                  src={`${API_BASE_URL}${fieldInfo.imageUrl}`}
+                  alt="Field Location"
+                  layout="fill"
+                  objectFit="cover"
+                  className="rounded-lg"
+                  onError={(e) => {
+                    console.error(`Failed to load image: ${API_BASE_URL}${fieldInfo.imageUrl}`);
+                    const target = e.target as HTMLImageElement;
+                    target.onerror = null; // prevents looping
+                    target.src = '/default-field-image.jpg'; // replace with a default image path
+                  }}
+                />
                 </div>
-                <a 
-                  href={fieldInfo.gpsLink} 
-                  target="_blank" 
-                  rel="noopener noreferrer" 
-                  className="text-2xl text-blue-300 underline mt-2 inline-block hover:text-blue-100"
-                >
-                  View on Google Maps
-                </a>
               </div>
             ) : (
               <div className="text-center">
@@ -670,6 +731,20 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
             )}
           </div>
         </div>
+
+        {/* GPS Link outside of the field graphic */}
+        {fieldInfo && (
+          <div className={`absolute ${userPlayer?.team === 'blue' ? 'right-1/4' : 'left-1/4'} transform ${userPlayer?.team === 'blue' ? 'translate-x-1/2' : '-translate-x-1/2'} text-center`} style={{ top: 'calc(60vh + 1rem)' }}>
+            <a 
+              href={`https://www.mapbox.com/maps/streets/?q=${fieldInfo.latitude},${fieldInfo.longitude}`} 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="text-2xl text-blue-500 underline hover:text-blue-700"
+            >
+              View on Mapbox
+            </a>
+          </div>
+        )}
 
         <div className="flex items-center justify-center mb-8">
           {gameState.gameState === 'lobby' ? (
@@ -775,9 +850,11 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                           >
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
-                                <img
+                                <Image
                                   src={getProfilePictureUrl(player.profilePicture)}
                                   alt={player.name}
+                                  width={40}
+                                  height={40}
                                   className="object-cover w-full h-full"
                                   onError={(e) => {
                                     const target = e.target as HTMLImageElement;
@@ -810,9 +887,11 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
                           >
                             <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center">
                               {player.profilePicture ? (
-                                <img
+                                <Image
                                   src={getProfilePictureUrl(player.profilePicture)}
                                   alt={player.name}
+                                  width={40}
+                                  height={40}
                                   className="object-cover w-full h-full"
                                   onError={(e) => {
                                     const target = e.target as HTMLImageElement;
