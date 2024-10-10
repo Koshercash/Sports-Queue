@@ -19,6 +19,7 @@ import { createRealFields } from './scripts/createRealFields.js';
 import { findAndScheduleField } from './scripts/findAndScheduleField.js';
 import { Game } from './models/Game.js';
 import { Field } from './models/Field.js';
+import webpush from 'web-push';
 
 dotenv.config();
 
@@ -32,6 +33,17 @@ const upload = multer({ dest: 'uploads/' });
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
+
+const vapidKeys = {
+  publicKey: process.env.VAPID_PUBLIC_KEY,
+  privateKey: process.env.VAPID_PRIVATE_KEY
+};
+
+webpush.setVapidDetails(
+  'https://localhost:3000', // Replace with your actual domain
+  vapidKeys.publicKey,
+  vapidKeys.privateKey
+);
 
 app.use(express.json());
 app.use(cors({
@@ -97,6 +109,13 @@ async function startServer() {
     location: {
       type: { type: String, enum: ['Point'], required: false, default: 'Point' },
       coordinates: { type: [Number], required: false, default: [0, 0] }
+    },
+    pushSubscription: {
+      endpoint: String,
+      keys: {
+        p256dh: String,
+        auth: String
+      }
     }
   });
 
@@ -358,21 +377,13 @@ async function startServer() {
     const fieldsCount = await Field.countDocuments();
     console.log(`Current field count: ${fieldsCount}`);
     if (fieldsCount === 0) {
-      console.log('No fields found. Creating real fields...');
-      await createRealFields();
-      const newFieldsCount = await Field.countDocuments();
-      console.log(`Fields created. New field count: ${newFieldsCount}`);
+      console.log('No fields found. Fields will be created when a match is found.');
     } else {
-      console.log(`${fieldsCount} fields already exist in the database.`);
-      // Always recreate fields to ensure up-to-date availability
-      await Field.deleteMany({});
-      await createRealFields();
-      const newFieldsCount = await Field.countDocuments();
-      console.log(`Fields recreated with updated availability. New field count: ${newFieldsCount}`);
+      console.log(`${fieldsCount} fields exist in the database.`);
     }
   }
 
-  // Call initializeFields instead of createRealFields
+  // Call initializeFields
   await initializeFields();
 
   app.post('/api/register', upload.fields([
@@ -499,6 +510,25 @@ async function startServer() {
       res.status(401).json({ error: 'Invalid token' });
     }
   };
+  app.post('/api/subscribe', authMiddleware, async (req, res) => {
+    try {
+      const userId = req.userId;
+      const subscription = req.body;
+  
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+  
+      user.pushSubscription = subscription;
+      await user.save();
+  
+      res.status(200).json({ message: 'Subscription saved successfully' });
+    } catch (error) {
+      console.error('Error saving subscription:', error);
+      res.status(500).json({ error: 'Failed to save subscription' });
+    }
+  });
   app.post('/api/user/update-location', authMiddleware, async (req, res) => {
     try {
       const { latitude, longitude } = req.body;
@@ -964,11 +994,49 @@ async function checkForMatches(gameMode) {
     console.log(`Not enough players in ${gameMode} queue to create a match`);
     return;
   }
+
   const matchCreated = await tryCreateMatch(gameMode, modeField, playerCount, requiredPositions);
   if (matchCreated) {
     console.log(`Match created for ${gameMode}:`, matchCreated);
   } else {
     console.log(`Failed to create ${gameMode} match`);
+  }
+}
+async function updateFieldAvailability(fieldId, startTime, endTime) {
+  try {
+    const field = await Field.findById(fieldId);
+    if (!field) {
+      console.log('Field not found');
+      return;
+    }
+
+    const startDate = new Date(startTime);
+    const endDate = new Date(endTime);
+
+    let availabilityUpdated = false;
+    for (let i = 0; i < field.availability.length; i++) {
+      const availabilityDate = new Date(field.availability[i].date);
+      if (availabilityDate.toDateString() === startDate.toDateString()) {
+        for (let j = 0; j < field.availability[i].slots.length; j++) {
+          const slotStart = new Date(field.availability[i].slots[j].startTime);
+          const slotEnd = new Date(field.availability[i].slots[j].endTime);
+          if (slotStart >= startDate && slotEnd <= endDate) {
+            field.availability[i].slots[j].isAvailable = false;
+            availabilityUpdated = true;
+          }
+        }
+        break;
+      }
+    }
+
+    if (availabilityUpdated) {
+      await field.save();
+      console.log('Field availability updated successfully');
+    } else {
+      console.log('No matching availability slots found for update');
+    }
+  } catch (error) {
+    console.error('Error updating field availability:', error);
   }
 }
 async function startMatchmakingProcess() {
@@ -985,27 +1053,48 @@ async function startMatchmakingProcess() {
   }
 }
 async function notifyMatchedPlayers(players, matchResult) {
-  console.log('Notifying matched players:', players.map(p => p.id));
+  console.log('Notifying matched players:', players.map(p => p.userId._id));
   
   for (const player of players) {
-    const ws = activeConnections.get(player.id.toString());
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: 'matchFound',
-        matchDetails: {
-          gameId: matchResult.gameId,
-          fieldName: matchResult.fieldName,
-          fieldImageUrl: matchResult.imageUrl, 
-          startTime: matchResult.startTime,
-          endTime: matchResult.endTime,
-          team: player.team
+    if (!player || !player.userId) {
+      console.log('Invalid player object:', player);
+      continue;
+    }
+
+    try {
+      const user = await User.findById(player.userId._id);
+      if (user && user.pushSubscription) {
+        const payload = JSON.stringify({
+          title: 'Match Found!',
+          body: `A ${matchResult.gameMode} match has been found. Get ready to play!`,
+          data: {
+            gameId: matchResult.gameId.toString(),
+            url: '/game'
+          }
+        });
+
+        try {
+          await webpush.sendNotification(user.pushSubscription, payload);
+          console.log(`Push notification sent to player ${player.userId._id}`);
+        } catch (error) {
+          console.error(`Failed to send push notification to player ${player.userId._id}:`, error);
         }
-      }));
-      console.log(`Notified player ${player.id} about match`);
-    } else {
-      console.log(`WebSocket not found or not open for player ${player.id}`);
-      // You might want to implement an alternative notification method here,
-      // such as sending an email or push notification
+      } else {
+        console.log(`No valid push subscription found for player ${player.userId._id}`);
+      }
+
+      const ws = activeConnections.get(player.userId._id.toString());
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'matchFound',
+          matchDetails: matchResult
+        }));
+        console.log(`WebSocket notification sent to player ${player.userId._id}`);
+      } else {
+        console.log(`WebSocket not found or not open for player ${player.userId._id}`);
+      }
+    } catch (error) {
+      console.error(`Error notifying player ${player.userId._id}:`, error);
     }
   }
 }
@@ -1051,7 +1140,7 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
   const findPlayerForPosition = (position, team) => {
     let player = queuedPlayers.find(qp => 
       !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
-      (gameMode === '5v5' ?
+      (gameMode === '5v5' ? 
         (position === 'goalkeeper' ? 
           (qp.userId.position === 'goalkeeper' || qp.userId.secondaryPosition === 'goalkeeper') :
           (qp.userId.position !== 'goalkeeper' && qp.userId.secondaryPosition !== 'goalkeeper')) :
@@ -1121,9 +1210,18 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
   }
 
   function calculateTeamStrength(team) {
-    return team.reduce((sum, player) => sum + player.userId[modeField], 0);
+    return team.reduce((sum, player) => sum + player[modeField], 0);
   }
-
+  function calculateCenterPoint(coordinates) {
+    const totalLat = coordinates.reduce((sum, coord) => sum + coord[1], 0);
+    const totalLon = coordinates.reduce((sum, coord) => sum + coord[0], 0);
+    const count = coordinates.length;
+  
+    return {
+      latitude: totalLat / count,
+      longitude: totalLon / count
+    };
+  }
   function balanceTeams() {
     const maxIterations = 100;
     for (let i = 0; i < maxIterations; i++) {
@@ -1168,12 +1266,27 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
 
   matchPlayers = [...blueTeam, ...redTeam];
 
+  while (matchPlayers.length < playerCount) {
+    const dummyPlayer = queuedPlayers.find(qp => 
+      qp.userId.email.startsWith('dummy') && 
+      !matchPlayers.some(mp => mp.userId._id.equals(qp.userId._id))
+    );
+    if (dummyPlayer) {
+      matchPlayers.push(dummyPlayer);
+    } else {
+      console.log('Not enough players to create a match');
+      return null;
+    }
+  }
+
   if (matchPlayers.length === playerCount) {
     console.log(`Successfully created match with ${matchPlayers.length} players, including at least one real player`);
   
     try {
-      const fieldSchedule = await findAndScheduleField(matchPlayers.map(p => p.userId), gameMode);
+      const centerPoint = calculateCenterPoint(matchPlayers.map(p => p.userId.location.coordinates));
+      await createRealFields(centerPoint.latitude, centerPoint.longitude);
 
+      const fieldSchedule = await findAndScheduleField(matchPlayers.map(p => p.userId), gameMode);
       if (!fieldSchedule) {
         console.log('No suitable field or time slot found');
         await returnPlayersToQueue(matchPlayers, gameMode);
@@ -1193,41 +1306,50 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
 
       await newGame.save();
 
-      // Update field availability
-      if (fieldSchedule.availabilityIndex !== undefined && fieldSchedule.slotIndex !== undefined) {
-        const field = await Field.findById(fieldSchedule.field._id);
-        if (field && field.availability && field.availability[fieldSchedule.availabilityIndex]) {
-          const availabilitySlot = field.availability[fieldSchedule.availabilityIndex];
-          if (availabilitySlot.slots && availabilitySlot.slots[fieldSchedule.slotIndex]) {
-            availabilitySlot.slots[fieldSchedule.slotIndex].isAvailable = false;
-            await field.save();
-            console.log('Field availability updated successfully');
-          } else {
-            console.log('Warning: Could not update field availability - slot not found');
-          }
-        } else {
-          console.log('Warning: Could not update field availability - availability not found');
-        }
-      } else {
-        console.log('Warning: Could not update field availability due to missing indices');
-      }
-
       const matchResult = {
         gameId: newGame._id,
-        team1: formatTeamData(blueTeam, modeField),
-        team2: formatTeamData(redTeam, modeField),
+        team1: matchPlayers.filter(p => p.team === 'blue').map(p => ({
+          id: p.userId._id,
+          name: p.userId.name,
+          mmr: p.userId[modeField],
+          position: p.position,
+          primaryPosition: p.userId.position,
+          secondaryPosition: p.userId.secondaryPosition,
+          profilePicture: p.userId.profilePicturePath,
+          isReal: !p.userId.email.startsWith('dummy'),
+          team: 'blue'
+        })),
+        team2: matchPlayers.filter(p => p.team === 'red').map(p => ({
+          id: p.userId._id,
+          name: p.userId.name,
+          mmr: p.userId[modeField],
+          position: p.position,
+          primaryPosition: p.userId.position,
+          secondaryPosition: p.userId.secondaryPosition,
+          profilePicture: p.userId.profilePicturePath,
+          isReal: !p.userId.email.startsWith('dummy'),
+          team: 'red'
+        })),
         fieldName: fieldSchedule.field.name,
         fieldLocation: fieldSchedule.field.location,
         startTime: fieldSchedule.startTime,
         endTime: fieldSchedule.endTime,
-        imageUrl: fieldSchedule.field.imageUrl
+        imageUrl: fieldSchedule.field.imageUrl,
+        gameMode
       };
 
-      notifyMatchedPlayers(matchResult.team1.concat(matchResult.team2), matchResult);
+      console.log(`Match created for ${gameMode}:`, matchResult);
+
+      await notifyMatchedPlayers(matchPlayers, matchResult);
+
+      if (fieldSchedule.availabilityIndex !== undefined && fieldSchedule.slotIndex !== undefined) {
+        await updateFieldAvailability(fieldSchedule.field._id, fieldSchedule.startTime, fieldSchedule.endTime);
+      }
 
       return matchResult;
     } catch (error) {
       console.error('Error creating game:', error);
+      await returnPlayersToQueue(matchPlayers, gameMode);
       return null;
     }
   }
@@ -1236,7 +1358,6 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
   await returnPlayersToQueue(matchPlayers, gameMode);
   return null;
 }
-
 function isPlayerSuitableForPosition(player, position) {
   if (position === 'goalkeeper') {
     return player.position === 'goalkeeper' || player.secondaryPosition === 'goalkeeper';
@@ -1420,25 +1541,37 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
         return res.status(404).json({ error: 'Field not found for this game' });
       }
   
-      // Generate a Google Maps link
-      const gpsLink = `https://www.google.com/maps/search/?api=1&query=${field.location.coordinates[1]},${field.location.coordinates[0]}`;
+      // Generate a Mapbox link using the coordinates
+      const gpsLink = `https://www.mapbox.com/maps/streets/?q=${field.location.coordinates[1]},${field.location.coordinates[0]}`;
   
-      const imageUrl = field.imageUrl.startsWith('http') 
-      ? field.imageUrl 
-      : `${API_BASE_URL}${field.imageUrl}`;
-
-    res.json({
-      name: field.name,
-      gpsLink: gpsLink,
-      imageUrl: imageUrl,
-      latitude: field.location.coordinates[1],
-      longitude: field.location.coordinates[0]
-    });
-  } catch (error) {
-    console.error('Error fetching field info:', error);
-    res.status(500).json({ error: 'Failed to fetch field information' });
-  }
-});
+      // Ensure the image URL is correct
+      let imageUrl = field.imageUrl;
+      if (!imageUrl.startsWith('http') && !imageUrl.startsWith('/')) {
+        imageUrl = `/uploads/fields/${imageUrl}`;
+      }
+      // Remove the API_BASE_URL concatenation here
+      // imageUrl = `${API_BASE_URL}${imageUrl}`;
+  
+      console.log('Field data:', {
+        name: field.name,
+        gpsLink: gpsLink,
+        imageUrl: imageUrl,
+        latitude: field.location.coordinates[1],
+        longitude: field.location.coordinates[0]
+      });
+  
+      res.json({
+        name: field.name,
+        gpsLink: gpsLink,
+        imageUrl: imageUrl,
+        latitude: field.location.coordinates[1],
+        longitude: field.location.coordinates[0]
+      });
+    } catch (error) {
+      console.error('Error fetching field info:', error);
+      res.status(500).json({ error: 'Failed to fetch field information' });
+    }
+  });
   // Update profile picture
   app.post('/api/user/profile-picture', authMiddleware, upload.single('profilePicture'), async (req, res) => {
     try {

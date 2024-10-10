@@ -4,33 +4,43 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { Field } from '../models/Field.js';
+import { fetchFieldData } from './fetchFieldData.js';
+import { fetchAndSaveFieldImage } from './fetchFieldImages.js';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export const createRealFields = async () => {
+export const createRealFields = async (centerLat, centerLng) => {
   try {
-    // Read real field data from a JSON file
-    const fieldsData = JSON.parse(
-      await fs.readFile(path.join(__dirname, 'realFieldsData.json'), 'utf8')
-    );
+    console.log(`Creating fields around center point: ${centerLat}, ${centerLng}`);
+    // Delete existing fields
+    await Field.deleteMany({});
+    console.log('Existing fields deleted');
 
-    for (const field of fieldsData) {
+    const fieldsData = await fetchFieldData(centerLat, centerLng);
+    console.log(`Fetched ${fieldsData.length} fields from Mapbox`);
+
+    for (const fieldData of fieldsData) {
+      const { name, latitude, longitude, size, placeId } = fieldData;
+      const availability = generateAvailability();
+      const imageUrl = await fetchAndSaveFieldImage(placeId, name, longitude, latitude);
+      console.log(`Image URL for ${name}: ${imageUrl}`);
+
       const newField = new Field({
-        name: field.name,
-        size: field.size,
+        name,
         location: {
           type: 'Point',
-          coordinates: [field.longitude, field.latitude],
+          coordinates: [longitude, latitude]
         },
-        availability: generateAvailability(),
-        imageUrl: `/uploads/fields/${field.name.toLowerCase().replace(/\s+/g, '-')}.jpg` // Assuming you have these images
+        size,
+        availability,
+        imageUrl: imageUrl || null
       });
 
       await newField.save();
-      console.log(`Field ${field.name} created`);
+      console.log(`Field ${newField.name} created with availability:`, availability);
     }
 
     console.log('All fields created successfully');
