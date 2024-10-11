@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import { Field } from '../models/Field.js';
 import { Game } from '../models/Game.js'; // Assuming you have a Game model
+import { getDistance } from 'geolib'; // Make sure to install geolib: npm install geolib
 
 dotenv.config();
 
@@ -52,6 +53,14 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
     for (const field of fields) {
       console.log(`Checking field: ${field.name}`);
       
+      // Calculate the furthest player's travel time
+      const furthestTravelTime = calculateFurthestTravelTime(players, field);
+      console.log(`Furthest travel time: ${furthestTravelTime} minutes`);
+
+      // Earliest possible start time considering travel
+      const earliestPossibleStart = new Date(now.getTime() + furthestTravelTime * 60000 + 10 * 60000); // Add 10 minutes buffer
+      console.log(`Earliest possible start time: ${earliestPossibleStart}`);
+
       if (!field.availability || field.availability.length === 0) {
         console.log(`Field ${field.name} has no availability data`);
         continue;
@@ -69,8 +78,8 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
         }
 
         for (const slot of av.slots) {
-          if (slot.startTime < now) {
-            console.log(`Slot in the past: ${slot.startTime}`);
+          if (slot.startTime < earliestPossibleStart) {
+            console.log(`Slot too early considering travel time: ${slot.startTime}`);
             continue;
           }
 
@@ -132,4 +141,20 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
     console.error('Error finding and scheduling field:', error);
     return null;
   }
+}
+
+function calculateFurthestTravelTime(players, field) {
+  let maxTravelTime = 0;
+  const fieldCoords = { latitude: field.location.coordinates[1], longitude: field.location.coordinates[0] };
+
+  players.forEach(player => {
+    if (player.location && player.location.coordinates) {
+      const playerCoords = { latitude: player.location.coordinates[1], longitude: player.location.coordinates[0] };
+      const distanceInMeters = getDistance(playerCoords, fieldCoords);
+      const travelTimeMinutes = Math.ceil(distanceInMeters / 833.33); // Assuming average speed of 50 km/h
+      maxTravelTime = Math.max(maxTravelTime, travelTimeMinutes);
+    }
+  });
+
+  return maxTravelTime;
 }

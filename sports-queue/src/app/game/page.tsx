@@ -34,12 +34,14 @@ interface Match {
   gameId: string;
   team1: MatchPlayer[];
   team2: MatchPlayer[];
-  // Add any other properties that might be present in the match object
+  startTime: string;
+  // ... any other properties
 }
 
 interface GameScreenProps {
   match: Match | null;
   gameMode: '5v5' | '11v11';
+  startTime: string;
   onBackFromGame: (gameJustEnded?: boolean) => void;
   currentUserId: string;
 }
@@ -122,6 +124,7 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   const [fieldInfo, setFieldInfo] = useState<FieldInfo | null>(null);
   const [isFieldInfoLoading, setIsFieldInfoLoading] = useState(true);
   const wsRef = useRef<WebSocket | null>(null);
+  const [gameStartTime, setGameStartTime] = useState<Date | null>(null);
 
   const players = match ? [
     ...(Array.isArray(match.team1) ? match.team1 : []),
@@ -403,8 +406,15 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     console.log('Current userId prop:', currentUserId);
     
     if (initialMatch) {
-      console.log('Setting match from initialMatch:', initialMatch);
+      console.log('Initial match data:', initialMatch);
       setMatch(initialMatch);
+      if (initialMatch.startTime) {
+        setGameStartTime(new Date(initialMatch.startTime));
+      } else {
+        console.warn('No start time provided in initial match data');
+        // You might want to set a default start time here
+        setGameStartTime(new Date());
+      }
     }
 
     // Load game state from localStorage on component mount
@@ -524,6 +534,12 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     };
   
     fetchFieldInfo();
+  }, [match]);
+
+  useEffect(() => {
+    if (match && match.startTime) {
+      setGameStartTime(new Date(match.startTime));
+    }
   }, [match]);
 
   const handleBackClick = () => {
@@ -669,22 +685,20 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
               <div className="text-center w-full">
                 <p className="text-4xl font-bold text-white mb-2">Field Location:</p>
                 <p className="text-3xl text-white mb-4">{fieldInfo.name}</p>
-                <div className="w-56 h-56 mx-auto relative">
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <Image
-                      src={`${API_BASE_URL}${fieldInfo.imageUrl}`}
-                      alt="Field Location"
-                      layout="fill"
-                      objectFit="cover"
-                      className="rounded-lg"
-                      onError={(e) => {
-                        console.error(`Failed to load image: ${API_BASE_URL}${fieldInfo.imageUrl}`);
-                        const target = e.target as HTMLImageElement;
-                        target.onerror = null; // prevents looping
-                        target.src = '/default-field-image.jpg'; // replace with a default image path
-                      }}
-                    />
-                  </div>
+                <div className="w-80 h-80 mx-auto relative mb-4">
+                  <Image
+                    src={`${API_BASE_URL}${fieldInfo.imageUrl}`}
+                    alt="Field Location"
+                    layout="fill"
+                    objectFit="cover"
+                    className="rounded-lg"
+                    onError={(e) => {
+                      console.error(`Failed to load image: ${API_BASE_URL}${fieldInfo.imageUrl}`);
+                      const target = e.target as HTMLImageElement;
+                      target.onerror = null;
+                      target.src = '/default-field-image.jpg';
+                    }}
+                  />
                 </div>
               </div>
             ) : (
@@ -761,12 +775,12 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
         {fieldInfo && (
           <div className={`absolute ${userPlayer?.team === 'blue' ? 'right-1/4' : 'left-1/4'} transform ${userPlayer?.team === 'blue' ? 'translate-x-1/2' : '-translate-x-1/2'} text-center`} style={{ top: 'calc(60vh + 1rem)' }}>
             <a 
-              href={`https://www.mapbox.com/maps/streets/?q=${fieldInfo.latitude},${fieldInfo.longitude}`} 
+              href={`https://www.google.com/maps/search/?api=1&query=${fieldInfo.latitude},${fieldInfo.longitude}`} 
               target="_blank" 
               rel="noopener noreferrer" 
-              className="text-2xl text-blue-500 underline hover:text-blue-700"
+              className="text-2xl text-blue-300 underline hover:text-blue-100"
             >
-              View on Mapbox
+              View on Google Maps
             </a>
           </div>
         )}
@@ -803,7 +817,9 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
 
         <div className="flex justify-between items-center mb-4 bg-white bg-opacity-80 p-2 rounded">
           <p className="font-medium">Current Time: {new Date().toLocaleTimeString()}</p>
-          <p className="font-medium">Game Start Time: {gameState.gameStartTime?.toLocaleTimeString()}</p>
+          <p className="font-medium">
+            Game Start Time: {gameStartTime ? gameStartTime.toLocaleTimeString() : 'Not set'}
+          </p>
           <p className="font-medium">Lobby Time: {lobbyTime} seconds</p>
         </div>
 

@@ -57,9 +57,11 @@ interface MatchPlayer {
 
 interface Match {
   id: string;
-  gameId: string; // Add this line
+  gameId: string;
   team1: MatchPlayer[];
   team2: MatchPlayer[];
+  startTime: string; // Add this line
+  // ... any other properties
 }
 
 interface UserProfileData {
@@ -285,7 +287,8 @@ export default function MainScreen() {
               assignedPosition: player.assignedPosition,
               team: 'red',
               profilePicture: player.profilePicture
-            }))
+            })),
+            startTime: response.data.match.startTime // Add this line
           };
           setMatch(formattedMatch);
           setGameState('loading');
