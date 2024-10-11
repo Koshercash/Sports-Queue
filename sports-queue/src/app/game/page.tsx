@@ -66,8 +66,7 @@ interface FieldInfo {
   latitude: number;
   longitude: number;
 }
-
-const ProfileImage = ({ src, alt, className = "" }) => {
+const ProfileImage = ({ src, alt, className = "" }: { src: string; alt: string; className?: string }) => {
   const [error, setError] = useState(false);
 
   if (error) {
@@ -661,29 +660,31 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
           </div>
 
           {/* Field location information */}
-          <div className={`absolute ${userPlayer?.team === 'blue' ? 'right-1/4' : 'left-1/4'} inset-y-0 transform ${userPlayer?.team === 'blue' ? 'translate-x-1/2' : '-translate-x-1/2'} flex flex-col justify-between items-center py-4`}>
+          <div className={`absolute ${userPlayer?.team === 'blue' ? 'right-1/4' : 'left-1/4'} inset-y-0 transform ${userPlayer?.team === 'blue' ? 'translate-x-1/2' : '-translate-x-1/2'} flex flex-col justify-between items-center py-4 w-1/2`}>
             {isFieldInfoLoading ? (
               <div className="text-center">
                 <p className="text-2xl text-white">Loading field information...</p>
               </div>
             ) : fieldInfo ? (
-              <div className="text-center">
+              <div className="text-center w-full">
                 <p className="text-4xl font-bold text-white mb-2">Field Location:</p>
-                <p className="text-3xl text-white">{fieldInfo.name}</p>
-                <div className="w-56 h-56 relative mt-2">
-                <Image
-                  src={`${API_BASE_URL}${fieldInfo.imageUrl}`}
-                  alt="Field Location"
-                  layout="fill"
-                  objectFit="cover"
-                  className="rounded-lg"
-                  onError={(e) => {
-                    console.error(`Failed to load image: ${API_BASE_URL}${fieldInfo.imageUrl}`);
-                    const target = e.target as HTMLImageElement;
-                    target.onerror = null; // prevents looping
-                    target.src = '/default-field-image.jpg'; // replace with a default image path
-                  }}
-                />
+                <p className="text-3xl text-white mb-4">{fieldInfo.name}</p>
+                <div className="w-56 h-56 mx-auto relative">
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Image
+                      src={`${API_BASE_URL}${fieldInfo.imageUrl}`}
+                      alt="Field Location"
+                      layout="fill"
+                      objectFit="cover"
+                      className="rounded-lg"
+                      onError={(e) => {
+                        console.error(`Failed to load image: ${API_BASE_URL}${fieldInfo.imageUrl}`);
+                        const target = e.target as HTMLImageElement;
+                        target.onerror = null; // prevents looping
+                        target.src = '/default-field-image.jpg'; // replace with a default image path
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             ) : (
