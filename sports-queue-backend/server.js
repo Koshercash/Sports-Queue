@@ -1147,10 +1147,44 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     );
   };
 
-  const findPlayerForPosition = (position, team, centerPlayer, radius) => {
-    const nearbyPlayers = findPlayersWithinRadius(centerPlayer, radius);
-    let player = nearbyPlayers.find(qp => 
-      !matchPlayers.some(mp => mp.userId._id.equals(qp.userId._id)) &&
+  let availablePlayers = [...queuedPlayers];
+
+  while (matchPlayers.length < playerCount && maxMMRDifference <= 800) {
+    for (const position of requiredPositions) {
+      if (matchPlayers.length >= playerCount) break;
+
+      const bluePlayer = findPlayerForPosition(position, 'blue', availablePlayers, matchPlayers, lowestMMR, highestMMR, maxMMRDifference);
+      if (bluePlayer) {
+        matchPlayers.push(bluePlayer);
+        blueTeam.push(bluePlayer);
+        availablePlayers = availablePlayers.filter(p => p.userId._id.toString() !== bluePlayer.userId._id.toString());
+        updateMMRRange(bluePlayer.userId[modeField]);
+      }
+
+      if (matchPlayers.length >= playerCount) break;
+
+      const redPlayer = findPlayerForPosition(position, 'red', availablePlayers, matchPlayers, lowestMMR, highestMMR, maxMMRDifference);
+      if (redPlayer) {
+        matchPlayers.push(redPlayer);
+        redTeam.push(redPlayer);
+        availablePlayers = availablePlayers.filter(p => p.userId._id.toString() !== redPlayer.userId._id.toString());
+        updateMMRRange(redPlayer.userId[modeField]);
+      }
+    }
+
+    if (matchPlayers.length < playerCount) {
+      maxMMRDifference += 100;
+      console.log(`Increasing MMR difference to ${maxMMRDifference}`);
+    }
+  }
+
+  function updateMMRRange(mmr) {
+    lowestMMR = Math.min(lowestMMR, mmr);
+    highestMMR = Math.max(highestMMR, mmr);
+  }
+
+  function findPlayerForPosition(position, team, availablePlayers, matchPlayers, lowestMMR, highestMMR, maxMMRDifference) {
+    let player = availablePlayers.find(qp => 
       (gameMode === '5v5' ? 
         (position === 'goalkeeper' ? 
           (qp.userId.position === 'goalkeeper' || qp.userId.secondaryPosition === 'goalkeeper') :
@@ -1162,8 +1196,7 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     );
     
     if (!player && position !== 'goalkeeper') {
-      player = nearbyPlayers.find(qp => 
-        !matchPlayers.some(mp => mp.userId._id.equals(qp.userId._id)) &&
+      player = availablePlayers.find(qp => 
         qp.userId.position !== 'goalkeeper' &&
         qp.userId.secondaryPosition !== 'goalkeeper' &&
         (matchPlayers.length === 0 || 
@@ -1173,78 +1206,18 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     }
 
     if (player) {
-      const playerData = { 
+      return { 
         userId: player.userId, 
         position: gameMode === '5v5' && position !== 'goalkeeper' ? 'non-goalkeeper' : position,
         team: team
       };
-      matchPlayers.push(playerData);
-      team === 'blue' ? blueTeam.push(playerData) : redTeam.push(playerData);
-      lowestMMR = Math.min(lowestMMR, player.userId[modeField]);
-      highestMMR = Math.max(highestMMR, player.userId[modeField]);
-      return true;
     }
-    return false;
-  };
-
-  const positions = gameMode === '5v5' ? 
-    ['goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper'] :
-    ['goalkeeper', 'fullback', 'fullback', 'centerback', 'centerback', 'winger', 'winger', 'midfielder', 'midfielder', 'midfielder', 'striker'];
-
-  let currentRadius = 10; // Start with 10 km
-  const maxRadius = 80.47; // 50 miles in km
-
-  while (currentRadius <= maxRadius) {
-    console.log(`Searching for players within ${currentRadius} km`);
-    
-    for (const centerPlayer of queuedPlayers) {
-      if (!centerPlayer.userId || !centerPlayer.userId.location || !centerPlayer.userId.location.coordinates) {
-        console.log(`Skipping player without valid location data: ${centerPlayer.userId ? centerPlayer.userId._id : 'Unknown'}`);
-        continue;
-      }
-      matchPlayers = [];
-      blueTeam = [];
-      redTeam = [];
-      lowestMMR = Infinity;
-      highestMMR = -Infinity;
-
-      let allPositionsFilled = true;
-      for (const position of positions) {
-        if (!findPlayerForPosition(position, 'blue', centerPlayer, currentRadius) ||
-            !findPlayerForPosition(position, 'red', centerPlayer, currentRadius)) {
-          allPositionsFilled = false;
-          break;
-        }
-      }
-
-      if (allPositionsFilled) {
-        console.log(`Successfully created match with ${matchPlayers.length} players within ${currentRadius} km`);
-        break;
-      }
-    }
-
-    if (matchPlayers.length === playerCount) break;
-    currentRadius *= 2; // Double the radius for the next iteration
+    return null;
   }
 
   if (matchPlayers.length < playerCount) {
-    console.log(`Not enough players found within ${maxRadius} km. Adding dummy players.`);
-    while (matchPlayers.length < playerCount) {
-      const dummyPlayer = queuedPlayers.find(qp => 
-        qp.userId.email.startsWith('dummy') && 
-        !matchPlayers.some(mp => mp.userId._id.equals(qp.userId._id))
-      );
-      if (dummyPlayer) {
-        matchPlayers.push({ 
-          userId: dummyPlayer.userId, 
-          position: dummyPlayer.userId.position,
-          team: matchPlayers.length % 2 === 0 ? 'blue' : 'red'
-        });
-      } else {
-        console.log('Not enough players to create a match');
-        return null;
-      }
-    }
+    console.log(`Not enough players found. Players found: ${matchPlayers.length}`);
+    return null;
   }
 
   function swapPlayers(teamA, teamB, indexA, indexB) {
