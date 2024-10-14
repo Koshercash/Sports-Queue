@@ -8,13 +8,16 @@ dotenv.config();
 
 export async function findAndScheduleField(players, gameMode, duration = 60) {
   try {
+    console.log('Current server time:', new Date().toISOString());
+    console.log('Current server local time:', new Date().toString());
+
     const centerLat = players.reduce((sum, p) => sum + (p.location?.coordinates[1] || 0), 0) / players.length;
     const centerLon = players.reduce((sum, p) => sum + (p.location?.coordinates[0] || 0), 0) / players.length;
 
     console.log('Center coordinates:', { centerLat, centerLon });
 
     const now = new Date();
-    const fourHoursLater = new Date(now.getTime() + 4 * 60 * 60 * 1000);
+    const sixHoursLater = new Date(now.getTime() + 6 * 60 * 60 * 1000);
 
     let fields = [];
     let searchRadius = 10000; // Start with a 10km radius
@@ -53,13 +56,8 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
     for (const field of fields) {
       console.log(`Checking field: ${field.name}`);
       
-      // Calculate the furthest player's travel time
-      const furthestTravelTime = calculateFurthestTravelTime(players, field);
-      console.log(`Furthest travel time: ${furthestTravelTime} minutes`);
-
-      // Earliest possible start time considering travel
-      const earliestPossibleStart = new Date(now.getTime() + furthestTravelTime * 60000 + 10 * 60000); // Add 10 minutes buffer
-      console.log(`Earliest possible start time: ${earliestPossibleStart}`);
+      const earliestPossibleStartTime = calculateEarliestStartTime(players, field.location);
+      console.log(`Earliest possible start time: ${earliestPossibleStartTime.toISOString()}`);
 
       if (!field.availability || field.availability.length === 0) {
         console.log(`Field ${field.name} has no availability data`);
@@ -67,7 +65,7 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
       }
 
       for (const av of field.availability) {
-        if (av.date > fourHoursLater) {
+        if (av.date > sixHoursLater) {
           console.log(`Availability date too far in the future: ${av.date}`);
           continue;
         }
@@ -77,29 +75,22 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
           continue;
         }
 
-        for (const slot of av.slots) {
-          if (slot.startTime < earliestPossibleStart) {
-            console.log(`Slot too early considering travel time: ${slot.startTime}`);
-            continue;
-          }
+        // Find the first slot that starts after the earliestPossibleStartTime
+        const suitableSlot = av.slots.find(slot => 
+          slot.startTime >= earliestPossibleStartTime && 
+          slot.startTime <= sixHoursLater &&
+          slot.isAvailable
+        );
 
-          if (slot.startTime > fourHoursLater) {
-            console.log(`Slot too far in the future: ${slot.startTime}`);
-            continue;
-          }
+        if (suitableSlot) {
+          console.log(`Found suitable slot: ${suitableSlot.startTime.toISOString()} - ${suitableSlot.endTime.toISOString()}`);
 
-          if (!slot.isAvailable) {
-            console.log(`Slot not available: ${slot.startTime} - ${slot.endTime}`);
-            continue;
-          }
-
-          console.log(`Checking slot: ${slot.startTime} - ${slot.endTime}`);
-
+          // Check for conflicting games
           const conflictingGame = await Game.findOne({
             field: field._id,
             $or: [
-              { startTime: { $lt: slot.endTime, $gte: slot.startTime } },
-              { endTime: { $gt: slot.startTime, $lte: slot.endTime } }
+              { startTime: { $lt: suitableSlot.endTime, $gte: suitableSlot.startTime } },
+              { endTime: { $gt: suitableSlot.startTime, $lte: suitableSlot.endTime } }
             ]
           });
 
@@ -108,34 +99,19 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
             continue;
           }
 
-          const previousGame = await Game.findOne({
-            field: field._id,
-            endTime: { $lt: slot.startTime }
-          }).sort({ endTime: -1 });
-
-          const nextGame = await Game.findOne({
-            field: field._id,
-            startTime: { $gt: slot.endTime }
-          }).sort({ startTime: 1 });
-
-          if ((!previousGame || (slot.startTime - previousGame.endTime) >= 3600000) &&
-              (!nextGame || (nextGame.startTime - slot.endTime) >= 3600000)) {
-            console.log(`Found available slot: ${slot.startTime} - ${slot.endTime}`);
-            return {
-              field: field,
-              startTime: slot.startTime,
-              endTime: new Date(slot.startTime.getTime() + duration * 60000),
-              availabilityIndex: field.availability.indexOf(av),
-              slotIndex: av.slots.indexOf(slot)
-            };
-          } else {
-            console.log(`Slot rejected due to insufficient time between games`);
-          }
+          // If we've reached this point, we've found a suitable slot
+          return {
+            field: field,
+            startTime: suitableSlot.startTime,
+            endTime: new Date(suitableSlot.startTime.getTime() + duration * 60000),
+            availabilityIndex: field.availability.indexOf(av),
+            slotIndex: av.slots.indexOf(suitableSlot)
+          };
         }
       }
     }
 
-    console.log('No available time slots found within the next 4 hours');
+    console.log('No available time slots found within the next 6 hours');
     return null;
   } catch (error) {
     console.error('Error finding and scheduling field:', error);
@@ -143,18 +119,32 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
   }
 }
 
-function calculateFurthestTravelTime(players, field) {
+function calculateEarliestStartTime(players, fieldLocation) {
   let maxTravelTime = 0;
-  const fieldCoords = { latitude: field.location.coordinates[1], longitude: field.location.coordinates[0] };
-
   players.forEach(player => {
     if (player.location && player.location.coordinates) {
-      const playerCoords = { latitude: player.location.coordinates[1], longitude: player.location.coordinates[0] };
-      const distanceInMeters = getDistance(playerCoords, fieldCoords);
-      const travelTimeMinutes = Math.ceil(distanceInMeters / 833.33); // Assuming average speed of 50 km/h
-      maxTravelTime = Math.max(maxTravelTime, travelTimeMinutes);
+      const distance = getDistance(
+        { latitude: player.location.coordinates[1], longitude: player.location.coordinates[0] },
+        { latitude: fieldLocation.coordinates[1], longitude: fieldLocation.coordinates[0] }
+      );
+      // Assume average speed of 50 km/h, convert distance to km
+      const travelTimeMinutes = Math.ceil((distance / 1000) / (50 / 60));
+      if (travelTimeMinutes > maxTravelTime) {
+        maxTravelTime = travelTimeMinutes;
+      }
     }
   });
 
-  return maxTravelTime;
+  // Add 15 minutes buffer to the max travel time
+  const bufferMinutes = 15;
+  const totalMinutes = maxTravelTime + bufferMinutes;
+
+  const now = new Date();
+  const earliestStartTime = new Date(now.getTime() + totalMinutes * 60000);
+
+  // Round up to the nearest 5 minutes
+  earliestStartTime.setMinutes(Math.ceil(earliestStartTime.getMinutes() / 5) * 5);
+
+  console.log(`Calculated earliest start time: ${earliestStartTime.toISOString()}`);
+  return earliestStartTime;
 }

@@ -1137,9 +1137,20 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     return R * c;
   };
 
-  const findPlayerForPosition = (position, team) => {
-    let player = queuedPlayers.find(qp => 
+  const findPlayersWithinRadius = (centerPlayer, radius) => {
+    return queuedPlayers.filter(qp => 
       !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
+      calculateDistance(
+        centerPlayer.userId.location?.coordinates[1], centerPlayer.userId.location?.coordinates[0],
+        qp.userId.location?.coordinates[1], qp.userId.location?.coordinates[0]
+      ) <= radius
+    );
+  };
+
+  const findPlayerForPosition = (position, team, centerPlayer, radius) => {
+    const nearbyPlayers = findPlayersWithinRadius(centerPlayer, radius);
+    let player = nearbyPlayers.find(qp => 
+      !matchPlayers.some(mp => mp.userId._id.equals(qp.userId._id)) &&
       (gameMode === '5v5' ? 
         (position === 'goalkeeper' ? 
           (qp.userId.position === 'goalkeeper' || qp.userId.secondaryPosition === 'goalkeeper') :
@@ -1147,27 +1158,17 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
         (qp.userId.position === position || qp.userId.secondaryPosition === position)) &&
       (matchPlayers.length === 0 || 
        (qp.userId[modeField] >= lowestMMR - maxMMRDifference && 
-        qp.userId[modeField] <= highestMMR + maxMMRDifference)) &&
-      matchPlayers.every(mp => 
-        calculateDistance(
-          qp.userId.location?.coordinates[1], qp.userId.location?.coordinates[0],
-          mp.userId.location?.coordinates[1], mp.userId.location?.coordinates[0]
-        ) <= 80.47 // 50 miles in km
-      )
+        qp.userId[modeField] <= highestMMR + maxMMRDifference))
     );
     
     if (!player && position !== 'goalkeeper') {
-      player = queuedPlayers.find(qp => 
-        !matchPlayers.some(m => m.userId._id.equals(qp.userId._id)) &&
+      player = nearbyPlayers.find(qp => 
+        !matchPlayers.some(mp => mp.userId._id.equals(qp.userId._id)) &&
+        qp.userId.position !== 'goalkeeper' &&
+        qp.userId.secondaryPosition !== 'goalkeeper' &&
         (matchPlayers.length === 0 || 
          (qp.userId[modeField] >= lowestMMR - maxMMRDifference && 
-          qp.userId[modeField] <= highestMMR + maxMMRDifference)) &&
-        matchPlayers.every(mp => 
-          calculateDistance(
-            qp.userId.location?.coordinates[1], qp.userId.location?.coordinates[0],
-            mp.userId.location?.coordinates[1], mp.userId.location?.coordinates[0]
-          ) <= 80.47 // 50 miles in km
-        )
+          qp.userId[modeField] <= highestMMR + maxMMRDifference))
       );
     }
 
@@ -1187,20 +1188,63 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
   };
 
   const positions = gameMode === '5v5' ? 
-  ['goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper'] :
-  ['goalkeeper', 'fullback', 'fullback', 'centerback', 'centerback', 'winger', 'winger', 'midfielder', 'midfielder', 'midfielder', 'striker'];
+    ['goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper', 'non-goalkeeper'] :
+    ['goalkeeper', 'fullback', 'fullback', 'centerback', 'centerback', 'winger', 'winger', 'midfielder', 'midfielder', 'midfielder', 'striker'];
 
-  // Fill both teams
-  for (const position of positions) {
-    if (!findPlayerForPosition(position, 'blue') || !findPlayerForPosition(position, 'red')) {
-      console.log(`Couldn't find suitable players for position: ${position}`);
-      await returnPlayersToQueue(matchPlayers, gameMode);
-      return null;
+  let currentRadius = 10; // Start with 10 km
+  const maxRadius = 80.47; // 50 miles in km
+
+  while (currentRadius <= maxRadius) {
+    console.log(`Searching for players within ${currentRadius} km`);
+    
+    for (const centerPlayer of queuedPlayers) {
+      if (!centerPlayer.userId || !centerPlayer.userId.location || !centerPlayer.userId.location.coordinates) {
+        console.log(`Skipping player without valid location data: ${centerPlayer.userId ? centerPlayer.userId._id : 'Unknown'}`);
+        continue;
+      }
+      matchPlayers = [];
+      blueTeam = [];
+      redTeam = [];
+      lowestMMR = Infinity;
+      highestMMR = -Infinity;
+
+      let allPositionsFilled = true;
+      for (const position of positions) {
+        if (!findPlayerForPosition(position, 'blue', centerPlayer, currentRadius) ||
+            !findPlayerForPosition(position, 'red', centerPlayer, currentRadius)) {
+          allPositionsFilled = false;
+          break;
+        }
+      }
+
+      if (allPositionsFilled) {
+        console.log(`Successfully created match with ${matchPlayers.length} players within ${currentRadius} km`);
+        break;
+      }
     }
+
+    if (matchPlayers.length === playerCount) break;
+    currentRadius *= 2; // Double the radius for the next iteration
   }
 
-  for (const player of matchPlayers) {
-    await Queue.deleteOne({ userId: player.userId._id, gameMode });
+  if (matchPlayers.length < playerCount) {
+    console.log(`Not enough players found within ${maxRadius} km. Adding dummy players.`);
+    while (matchPlayers.length < playerCount) {
+      const dummyPlayer = queuedPlayers.find(qp => 
+        qp.userId.email.startsWith('dummy') && 
+        !matchPlayers.some(mp => mp.userId._id.equals(qp.userId._id))
+      );
+      if (dummyPlayer) {
+        matchPlayers.push({ 
+          userId: dummyPlayer.userId, 
+          position: dummyPlayer.userId.position,
+          team: matchPlayers.length % 2 === 0 ? 'blue' : 'red'
+        });
+      } else {
+        console.log('Not enough players to create a match');
+        return null;
+      }
+    }
   }
 
   function swapPlayers(teamA, teamB, indexA, indexB) {
@@ -1210,8 +1254,9 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
   }
 
   function calculateTeamStrength(team) {
-    return team.reduce((sum, player) => sum + player[modeField], 0);
+    return team.reduce((sum, player) => sum + player.userId[modeField], 0);
   }
+
   function calculateCenterPoint(coordinates) {
     const totalLat = coordinates.reduce((sum, coord) => sum + coord[1], 0);
     const totalLon = coordinates.reduce((sum, coord) => sum + coord[0], 0);
@@ -1222,6 +1267,7 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
       longitude: totalLon / count
     };
   }
+
   function balanceTeams() {
     const maxIterations = 100;
     for (let i = 0; i < maxIterations; i++) {
@@ -1265,19 +1311,6 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
   console.log('Red Team:', redTeam.map(p => ({ position: p.position, mmr: p.userId[modeField] })));
 
   matchPlayers = [...blueTeam, ...redTeam];
-
-  while (matchPlayers.length < playerCount) {
-    const dummyPlayer = queuedPlayers.find(qp => 
-      qp.userId.email.startsWith('dummy') && 
-      !matchPlayers.some(mp => mp.userId._id.equals(qp.userId._id))
-    );
-    if (dummyPlayer) {
-      matchPlayers.push(dummyPlayer);
-    } else {
-      console.log('Not enough players to create a match');
-      return null;
-    }
-  }
 
   if (matchPlayers.length === playerCount) {
     console.log(`Successfully created match with ${matchPlayers.length} players, including at least one real player`);
@@ -1344,6 +1377,11 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
 
       if (fieldSchedule.availabilityIndex !== undefined && fieldSchedule.slotIndex !== undefined) {
         await updateFieldAvailability(fieldSchedule.field._id, fieldSchedule.startTime, fieldSchedule.endTime);
+      }
+
+      // Remove matched players from the queue
+      for (const player of matchPlayers) {
+        await Queue.deleteOne({ userId: player.userId._id, gameMode });
       }
 
       return matchResult;
@@ -1865,7 +1903,7 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
     const YOUR_LATITUDE = parseFloat(process.env.YOUR_LATITUDE) || 40.7128;
     const YOUR_LONGITUDE = parseFloat(process.env.YOUR_LONGITUDE) || -74.0060;
   
-    for (let i = 0; i < 110; i++) {
+    for (let i = 0; i < 300; i++) {
       const name = `Dummy${i + 1}`;
       const email = `dummy${i + 1}@example.com`;
       const sex = i % 2 === 0 ? 'male' : 'female';

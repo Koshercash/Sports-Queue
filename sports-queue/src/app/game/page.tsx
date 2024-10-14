@@ -41,9 +41,9 @@ interface Match {
 interface GameScreenProps {
   match: Match | null;
   gameMode: '5v5' | '11v11';
-  startTime: string;
   onBackFromGame: (gameJustEnded?: boolean) => void;
   currentUserId: string;
+  startTime: string; // Add this line
 }
 
 interface UserProfileData {
@@ -95,7 +95,7 @@ const ProfileImage = ({ src, alt, className = "" }: { src: string; alt: string; 
   );
 };
 
-export default function GameScreen({ match: initialMatch, gameMode, onBackFromGame, currentUserId }: GameScreenProps) {
+export default function GameScreen({ match: initialMatch, gameMode, onBackFromGame, currentUserId, startTime }: GameScreenProps) {
   const router = useRouter();
   const { gameState, setGameState } = useGameState();
   const { user, isLoading, initializeUser } = useContext(UserContext);

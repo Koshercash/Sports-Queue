@@ -55,18 +55,20 @@ const generateAvailability = () => {
   for (let i = 0; i < 7; i++) { // Generate availability for the next 7 days
     const date = new Date(now);
     date.setDate(date.getDate() + i);
-    date.setHours(0, 0, 0, 0); // Set to start of day
+    date.setMinutes(0, 0, 0); // Set to the start of the hour
     const slots = [];
-    for (let hour = 0; hour < 24; hour++) { // Generate slots for all 24 hours
-      const startTime = new Date(date);
-      startTime.setHours(hour);
-      const endTime = new Date(startTime);
-      endTime.setHours(hour + 1);
-      slots.push({
-        startTime,
-        endTime,
-        isAvailable: Math.random() > 0.3, // 70% chance of being available
-      });
+    for (let hour = 0; hour < 24; hour++) {
+      for (let minute = 0; minute < 60; minute += 15) { // Generate slots every 15 minutes
+        const startTime = new Date(date);
+        startTime.setHours(hour, minute);
+        const endTime = new Date(startTime);
+        endTime.setMinutes(endTime.getMinutes() + 15);
+        slots.push({
+          startTime,
+          endTime,
+          isAvailable: Math.random() > 0.3, // 70% chance of being available
+        });
+      }
     }
     availability.push({ date, slots });
   }

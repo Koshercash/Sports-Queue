@@ -1022,6 +1022,7 @@ export default function MainScreen() {
             gameMode={gameMode}
             onBackFromGame={handleBackFromGame}
             currentUserId={user?.userId || ''}
+            startTime={match?.startTime || ''} 
           />
         ) : (
           <>
