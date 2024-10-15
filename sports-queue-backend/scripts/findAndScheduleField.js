@@ -17,7 +17,7 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
     console.log('Center coordinates:', { centerLat, centerLon });
 
     const now = new Date();
-    const sixHoursLater = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const sixHoursLater = new Date(now.getTime() + 6 * 60 * 60 * 1000);
 
     let fields = [];
     let searchRadius = 10000; // Start with a 10km radius
@@ -85,9 +85,10 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
         if (suitableSlot) {
           console.log(`Found suitable slot: ${suitableSlot.startTime.toISOString()} - ${suitableSlot.endTime.toISOString()}`);
 
-          // Check for conflicting games
+          // Check for conflicting games that are in lobby or in-progress
           const conflictingGame = await Game.findOne({
             field: field._id,
+            status: { $in: ['lobby', 'inProgress'] },
             $or: [
               { startTime: { $lt: suitableSlot.endTime, $gte: suitableSlot.startTime } },
               { endTime: { $gt: suitableSlot.startTime, $lte: suitableSlot.endTime } }
@@ -95,7 +96,7 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
           });
 
           if (conflictingGame) {
-            console.log(`Slot rejected due to conflicting game`);
+            console.log(`Slot rejected due to conflicting active game`);
             continue;
           }
 

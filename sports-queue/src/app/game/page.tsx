@@ -179,8 +179,9 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     });
 
     let warningMessage = 'Warning: Leaving the game now may result in a penalty.';
-    if (lobbyTimeMinutes >= 1 && timeDifference <= 120) {
-      warningMessage = "Warning: Leaving the game now will result in a 24 hour queue penalty.";
+    if ((lobbyTimeMinutes >= 60 && timeDifference > 0 && timeDifference <= 60) ||
+    (lobbyTimeMinutes >= 30 && timeDifference > 0 && timeDifference <= 30)) {
+      warningMessage = "Warning: Leaving the game now may result in a 24 hour queue penalty.";
     }
 
     setLeaveWarningMessage(warningMessage);

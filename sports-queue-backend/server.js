@@ -1675,7 +1675,8 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
       let queueRestriction = false;
 
       // Updated conditions for penalties
-      if ((lobbyTimeMinutes >= 1 && timeDifference > 0 && timeDifference <= 120) ||
+      if ((lobbyTimeMinutes >= 60 && timeDifference > 0 && timeDifference <= 60) ||
+          (lobbyTimeMinutes >= 30 && timeDifference > 0 && timeDifference <= 30) ||
           now >= gameStartTimeFromDB ||
           penalty.leaveCount >= 3) {
         penalty.penaltyEndTime = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
