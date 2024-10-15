@@ -134,9 +134,21 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
   const handleLeaveGame = async () => {
     try {
       const token = localStorage.getItem('token');
+      const now = new Date();
+      const gameStart = gameState.gameStartTime ? new Date(gameState.gameStartTime) : (gameStartTime || now);
+      const timeDifference = Math.max(0, (gameStart.getTime() - now.getTime()) / (1000 * 60)); // difference in minutes, minimum 0
+
+      console.log('Leaving game with data:', {
+        lobbyTime,
+        timeDifference,
+        gameStartTime: gameStart.toISOString(),
+        currentTime: now.toISOString()
+      });
+
       await axios.post(`${API_BASE_URL}/api/game/leave`, {
         lobbyTime,
-        gameStartTime: gameState.gameStartTime
+        timeDifference,
+        gameStartTime: gameStart.toISOString()
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -155,11 +167,20 @@ export default function GameScreen({ match: initialMatch, gameMode, onBackFromGa
     }
 
     const now = new Date();
-    const timeDifference = gameState.gameStartTime ? (now.getTime() - gameState.gameStartTime.getTime()) / (1000 * 60) : 0;
-    
-    let warningMessage = '';
-    if (lobbyTime >= 8 && timeDifference <= 20 && gameState.gameState !== 'ended') {
-      warningMessage = 'Warning: Leaving the game now may result in a penalty.';
+    const gameStart = gameState.gameStartTime ? new Date(gameState.gameStartTime) : now;
+    const timeDifference = (gameStart.getTime() - now.getTime()) / (1000 * 60); // difference in minutes
+    const lobbyTimeMinutes = lobbyTime / 60; // Convert seconds to minutes
+
+    console.log('Leave game check:', { 
+      lobbyTimeMinutes, 
+      gameStartTime: gameState.gameStartTime, 
+      timeDifference,
+      currentTime: now.toISOString()
+    });
+
+    let warningMessage = 'Warning: Leaving the game now may result in a penalty.';
+    if (lobbyTimeMinutes >= 1 && timeDifference <= 120) {
+      warningMessage = "Warning: Leaving the game now will result in a 24 hour queue penalty.";
     }
 
     setLeaveWarningMessage(warningMessage);

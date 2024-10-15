@@ -144,15 +144,6 @@ async function startServer() {
     status: { type: String, enum: ['pending', 'accepted', 'rejected'] }
   });
 
-  const GameSchema = new mongoose.Schema({
-    players: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-    gameMode: String,
-    status: { type: String, enum: ['lobby', 'inProgress', 'ended'], default: 'lobby' },
-    startTime: Date,
-    endTime: Date,
-    field: { type: mongoose.Schema.Types.ObjectId, ref: 'Field' }
-  });
-
   const QueueSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     gameMode: String,
@@ -1407,6 +1398,28 @@ function formatTeamData(team, modeField) {
   }));
 }
 
+async function resetOrLowerPenaltyCount(penalty) {
+  const now = new Date();
+  const hoursSinceLastPenalty = (now - penalty.lastLeavePenaltyDate) / (1000 * 60 * 60);
+
+  if (hoursSinceLastPenalty >= 24) {
+    // Reset penalty count to 0 if it's been 24 hours or more since the last penalty
+    penalty.leaveCount = 0;
+    penalty.penaltyEndTime = null;
+  } else {
+    // Lower penalty count by 1 for every 12 hours passed, but not below 0
+    const reductionCount = Math.floor(hoursSinceLastPenalty / 12);
+    penalty.leaveCount = Math.max(0, penalty.leaveCount - reductionCount);
+    
+    // If penaltyEndTime is in the past, remove it
+    if (penalty.penaltyEndTime && penalty.penaltyEndTime <= now) {
+      penalty.penaltyEndTime = null;
+    }
+  }
+
+  return penalty;
+}
+
 app.post('/api/queue/join', authMiddleware, async (req, res) => {
   try {
     const { gameMode } = req.body;
@@ -1610,52 +1623,117 @@ app.post('/api/queue/join', authMiddleware, async (req, res) => {
     try {
       const { lobbyTime, gameStartTime } = req.body;
       const now = new Date();
-      const gameStart = gameStartTime ? new Date(gameStartTime) : now;
-      const timeDifference = (now.getTime() - gameStart.getTime()) / (1000 * 60); // difference in minutes
-  
-      console.log('Leave game request:', { lobbyTime, gameStartTime, timeDifference });
-  
-      // Find and update the active game for this user
+
+      // Find the active game for this user
       const activeGame = await Game.findOne({ 
         players: req.userId,
         status: { $in: ['lobby', 'inProgress'] }
       });
 
-      if (activeGame) {
-        activeGame.status = 'ended';
-        await activeGame.save();
+      if (!activeGame) {
+        return res.status(404).json({ error: 'No active game found for this user' });
       }
+
+      const gameStartTimeFromDB = activeGame.startTime || now;
+      const gameMode = activeGame.gameMode;
+      const lobbyTimeMinutes = lobbyTime / 60; // Convert seconds to minutes
+      const timeDifference = (gameStartTimeFromDB.getTime() - now.getTime()) / (1000 * 60); // difference in minutes
+
+      console.log('Leave game request:', { 
+        lobbyTimeMinutes, 
+        gameStartTime: gameStartTimeFromDB.toISOString(), 
+        timeDifference, 
+        gameMode,
+        currentTime: now.toISOString()
+      });
+
+      // Return other players to queue
+      for (const playerId of activeGame.players) {
+        if (playerId.toString() !== req.userId.toString()) {
+          await Queue.create({ userId: playerId, gameMode: activeGame.gameMode, joinedAt: new Date() });
+        }
+      }
+
+      activeGame.status = 'ended';
+      await activeGame.save();
 
       // Remove the user from any active queues
       await Queue.deleteMany({ userId: req.userId });
 
-      if (lobbyTime >= 8 && timeDifference <= 20) {
-        let penalty = await Penalty.findOne({ userId: req.userId });
-        if (!penalty) {
-          penalty = new Penalty({ userId: req.userId });
-        }
-  
-        penalty.leaveCount += 1;
-        penalty.lastLeavePenaltyDate = now;
-  
-        console.log('Updated penalty:', penalty);
-  
-        if (penalty.leaveCount >= 3) {
-          penalty.penaltyEndTime = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
-        }
-  
-        await penalty.save();
-  
-        console.log('Penalty saved:', penalty);
-  
-        res.json({ 
-          message: 'Game left successfully', 
-          penalized: penalty.leaveCount >= 3,
-          penaltyEndTime: penalty.penaltyEndTime
-        });
+      let penalty = await Penalty.findOne({ userId: req.userId });
+      if (!penalty) {
+        penalty = new Penalty({ userId: req.userId });
       } else {
-        res.json({ message: 'Game left successfully', penalized: false });
+        penalty = await resetOrLowerPenaltyCount(penalty);
       }
+
+      const isFirstLeave = penalty.leaveCount === 0;
+      penalty.leaveCount += 1;
+      penalty.lastLeavePenaltyDate = now;
+
+      let mmrReduction = 0;
+      let queueRestriction = false;
+
+      // Updated conditions for penalties
+      if ((lobbyTimeMinutes >= 1 && timeDifference > 0 && timeDifference <= 120) ||
+          now >= gameStartTimeFromDB ||
+          penalty.leaveCount >= 3) {
+        penalty.penaltyEndTime = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hours from now
+        queueRestriction = true;
+        mmrReduction = 10; // Apply MMR reduction even for first leave if it's a severe case
+      } else if (!isFirstLeave) {
+        mmrReduction = 10; // Apply MMR reduction for subsequent leaves
+      }
+
+      // Add this log to see the exact values being compared
+      console.log('Penalty check:', {
+        lobbyTimeMinutes,
+        timeDifference,
+        nowVsGameStart: now >= gameStartTimeFromDB,
+        leaveCount: penalty.leaveCount,
+        penaltyApplied: queueRestriction
+      });
+
+      const user = await User.findById(req.userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      if (mmrReduction > 0) {
+        if (gameMode === '5v5') {
+          user.mmr5v5 = Math.max(0, user.mmr5v5 - mmrReduction);
+        } else if (gameMode === '11v11') {
+          user.mmr11v11 = Math.max(0, user.mmr11v11 - mmrReduction);
+        } else {
+          // If gameMode is somehow undefined, reduce both MMRs
+          user.mmr5v5 = Math.max(0, user.mmr5v5 - mmrReduction);
+          user.mmr11v11 = Math.max(0, user.mmr11v11 - mmrReduction);
+        }
+        await user.save();
+      }
+
+      await penalty.save();
+
+      console.log('Updated penalty:', penalty);
+      console.log('MMR reduction:', mmrReduction);
+      console.log('Queue restriction:', queueRestriction);
+      console.log('Updated user MMR:', {
+        userId: user._id,
+        mmr5v5: user.mmr5v5,
+        mmr11v11: user.mmr11v11
+      });
+
+      res.json({ 
+        message: 'Game left successfully', 
+        penalized: queueRestriction,
+        penaltyEndTime: penalty.penaltyEndTime,
+        mmrReduction: mmrReduction,
+        gameMode: gameMode,
+        updatedMMR: {
+          mmr5v5: user.mmr5v5,
+          mmr11v11: user.mmr11v11
+        }
+      });
     } catch (error) {
       console.error('Detailed error in /api/game/leave:', error);
       res.status(500).json({ error: 'Failed to process game leave', details: error.message });

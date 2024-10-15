@@ -17,7 +17,7 @@ export async function findAndScheduleField(players, gameMode, duration = 60) {
     console.log('Center coordinates:', { centerLat, centerLon });
 
     const now = new Date();
-    const sixHoursLater = new Date(now.getTime() + 6 * 60 * 60 * 1000);
+    const sixHoursLater = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
     let fields = [];
     let searchRadius = 10000; // Start with a 10km radius
