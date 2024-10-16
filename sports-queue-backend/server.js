@@ -972,10 +972,7 @@ async function checkForMatches(gameMode) {
   if (gameMode === '5v5') {
     requiredPositions = POSITIONS_5V5.concat(POSITIONS_5V5);
   } else {
-    requiredPositions = [
-      ...POSITIONS_11V11.map(pos => ({ position: pos, team: 'blue' })),
-      ...POSITIONS_11V11.map(pos => ({ position: pos, team: 'red' }))
-    ];
+    requiredPositions = requiredPositions = POSITIONS_11V11.concat(POSITIONS_11V11);
   }
 
   const queueSize = await Queue.countDocuments({ gameMode });
@@ -1141,45 +1138,41 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
   let availablePlayers = [...queuedPlayers];
 
   while (matchPlayers.length < playerCount && maxMMRDifference <= 800) {
-    for (const position of requiredPositions) {
+    for (let i = 0; i < requiredPositions.length; i++) {
       if (matchPlayers.length >= playerCount) break;
 
-      const bluePlayer = findPlayerForPosition(position, 'blue', availablePlayers, matchPlayers, lowestMMR, highestMMR, maxMMRDifference);
-      if (bluePlayer) {
-        matchPlayers.push(bluePlayer);
-        blueTeam.push(bluePlayer);
-        availablePlayers = availablePlayers.filter(p => p.userId._id.toString() !== bluePlayer.userId._id.toString());
-        updateMMRRange(bluePlayer.userId[modeField]);
+      const position = requiredPositions[i];
+    const team = i < playerCount / 2 ? 'blue' : 'red';
+    const player = findPlayerForPosition(position, team, availablePlayers, matchPlayers, lowestMMR, highestMMR, maxMMRDifference, modeField);
+    
+    if (player) {
+      matchPlayers.push(player);
+      if (team === 'blue') {
+        blueTeam.push(player);
+      } else {
+        redTeam.push(player);
       }
-
-      if (matchPlayers.length >= playerCount) break;
-
-      const redPlayer = findPlayerForPosition(position, 'red', availablePlayers, matchPlayers, lowestMMR, highestMMR, maxMMRDifference);
-      if (redPlayer) {
-        matchPlayers.push(redPlayer);
-        redTeam.push(redPlayer);
-        availablePlayers = availablePlayers.filter(p => p.userId._id.toString() !== redPlayer.userId._id.toString());
-        updateMMRRange(redPlayer.userId[modeField]);
-      }
-    }
-
-    if (matchPlayers.length < playerCount) {
-      maxMMRDifference += 100;
-      console.log(`Increasing MMR difference to ${maxMMRDifference}`);
+      availablePlayers = availablePlayers.filter(p => p.userId._id.toString() !== player.userId._id.toString());
+      updateMMRRange(player.userId[modeField]);
     }
   }
+
+  if (matchPlayers.length < playerCount) {
+    maxMMRDifference += 100;
+    console.log(`Increasing MMR difference to ${maxMMRDifference}`);
+  }
+}
 
   function updateMMRRange(mmr) {
     lowestMMR = Math.min(lowestMMR, mmr);
     highestMMR = Math.max(highestMMR, mmr);
   }
 
-  function findPlayerForPosition(position, team, availablePlayers, matchPlayers, lowestMMR, highestMMR, maxMMRDifference) {
+  function findPlayerForPosition(position, team, availablePlayers, matchPlayers, lowestMMR, highestMMR, maxMMRDifference, modeField) {
     let player = availablePlayers.find(qp => 
-      (gameMode === '5v5' ? 
-        (position === 'goalkeeper' ? 
-          (qp.userId.position === 'goalkeeper' || qp.userId.secondaryPosition === 'goalkeeper') :
-          (qp.userId.position !== 'goalkeeper' && qp.userId.secondaryPosition !== 'goalkeeper')) :
+      !matchPlayers.some(mp => mp.userId._id.equals(qp.userId._id)) &&
+      (position === 'goalkeeper' ? 
+        (qp.userId.position === 'goalkeeper' || qp.userId.secondaryPosition === 'goalkeeper') :
         (qp.userId.position === position || qp.userId.secondaryPosition === position)) &&
       (matchPlayers.length === 0 || 
        (qp.userId[modeField] >= lowestMMR - maxMMRDifference && 
@@ -1188,6 +1181,7 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
     
     if (!player && position !== 'goalkeeper') {
       player = availablePlayers.find(qp => 
+        !matchPlayers.some(mp => mp.userId._id.equals(qp.userId._id)) &&
         qp.userId.position !== 'goalkeeper' &&
         qp.userId.secondaryPosition !== 'goalkeeper' &&
         (matchPlayers.length === 0 || 
@@ -1195,11 +1189,11 @@ async function tryCreateMatch(gameMode, modeField, playerCount, requiredPosition
           qp.userId[modeField] <= highestMMR + maxMMRDifference))
       );
     }
-
+  
     if (player) {
       return { 
         userId: player.userId, 
-        position: gameMode === '5v5' && position !== 'goalkeeper' ? 'non-goalkeeper' : position,
+        position: position,
         team: team
       };
     }
